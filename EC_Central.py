@@ -1,4 +1,5 @@
 import pygame
+import socket
 
 # Constantes CityMap
 WIDTH, HEIGHT = 800, 800
@@ -16,7 +17,7 @@ class CityMap:
         self.grid = [["" for _ in range(COLS)] for _ in range(ROWS)]  # Mapa vacío
 
     # Carga las letras del mapa
-    def loadMap(self, file):
+    def loadMap(self, file, sites):
         try:
             with open(file, "r") as file:
                 for line in file:
@@ -24,17 +25,12 @@ class CityMap:
                     if len(parts) == 3:     # Asegurar que haya una letra y dos números
                         letter = parts[0]
                         try:
-                            x, y = int(parts[1]), int(parts[2])
-
-                            # Si las coordenadas son mayores que el número de celdas, significa que ya están en píxeles
-                            if x >= WIDTH or y >= HEIGHT:
-                                grid_x, grid_y = x // CELL_SIZE, y // CELL_SIZE
-                            else:
-                                grid_x, grid_y = x, y   # Escalar de 20x20 a 800x800 multiplicando por el tamaño de celda
+                            x, y = int(parts[1]), int(parts[2]) 
 
                             # Validar que esté dentro del rango
-                            if 0 <= grid_x < COLS and 0 <= grid_y < ROWS:
-                                self.grid[grid_y][grid_x] = letter
+                            if 0 <= x < COLS and 0 <= y < ROWS:
+                                self.grid[y][x] = letter
+                                sites[letter] = (x, y)
 
                         except ValueError:
                             print(f"Ignorando línea inválida: {line.strip()}")
@@ -42,7 +38,7 @@ class CityMap:
         except FileNotFoundError:
             print(f"Error: No se encontró el archivo '{file}'")
 
-    # DIbuja el mapa
+    # Dibuja el mapa
     def draw(self, screen, font):
         for row in range(ROWS):
             for col in range(COLS):
@@ -58,14 +54,23 @@ class CityMap:
 
                 pygame.draw.rect(screen, BLACK, rect, 1)    # Borde
 
+
+class Central:
+    def __init__(self, port):
+        self.ip = socket.gethostbyname(socket.gethostname())
+        self.port = port
+
+
 def main():
     pygame.init()
     screen = pygame.display.set_mode((WIDTH, HEIGHT))
     pygame.display.set_caption("Mapa 20x20")
 
     font = pygame.font.Font(None, 36)   # Fuente para las letras
+    sites = {}                          # Localizaciones del mapa
+
     city_map = CityMap()
-    city_map.loadMap("city_map.txt")    # Cargar desde el archivo
+    city_map.loadMap("city_map.txt", sites)     # Cargar desde el archivo
 
     running = True
     while running:
