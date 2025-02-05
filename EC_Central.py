@@ -1,5 +1,8 @@
+import signal
+import sys
 import pygame
 import socket
+import threading
 
 # Constantes CityMap
 WIDTH, HEIGHT = 800, 800
@@ -59,9 +62,44 @@ class Central:
     def __init__(self, port):
         self.ip = socket.gethostbyname(socket.gethostname())
         self.port = port
+        self.sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        self.sock.bind((self.ip, self.port))
+        self.sock.listen(5)  # Permitir hasta 5 conexiones en cola
+        print(f"Central listening on {self.ip}:{self.port}")
 
+    def shutDown(self):
+        print("\nCerrando Central...")
+        self.sock.close()
+
+    def listenTaxis(self):
+        while True:
+            conn, addr = self.sock.accept()
+            print(f"Taxi conectado desde {addr}")
+
+            data = conn.recv(1024).decode("utf-8")
+            if data.startswith("AUTH#"):
+                taxi_id = data.split("#")[1]
+                print(f"Taxi {taxi_id} autenticado.")
+                conn.send("AUTH_OK".encode("utf-8"))
+            else:
+                print("Mensaje no reconocido")
+
+            conn.close()
+
+
+def handleExit(signum, frame):
+    global central
+    if central:
+        central.shutDown()
+    pygame.quit()
+    sys.exit(0)
 
 def main():
+    global central
+
+    # Registrar el manejador de Ctrl+C
+    signal.signal(signal.SIGINT, handleExit)
+
     pygame.init()
     screen = pygame.display.set_mode((WIDTH, HEIGHT))
     pygame.display.set_caption("Mapa 20x20")
@@ -71,6 +109,10 @@ def main():
 
     city_map = CityMap()
     city_map.loadMap("city_map.txt", sites)     # Cargar desde el archivo
+
+    # Crear objeto Central y lanzar su escucha en un hilo
+    central = Central(5000)
+    threading.Thread(target = central.listenTaxis, daemon = True).start()
 
     running = True
     while running:
@@ -84,6 +126,8 @@ def main():
         pygame.display.flip()
 
     pygame.quit()
+    central.shutDown()
 
 if __name__ == "__main__":
+    central = None  # Variable global para manejar el cierre
     main()
