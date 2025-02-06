@@ -3,6 +3,7 @@ import sys
 import pygame
 import socket
 import threading
+import sqlite3
 
 # Constantes CityMap
 WIDTH, HEIGHT = 800, 800
@@ -65,26 +66,44 @@ class Central:
         self.sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         self.sock.bind((self.ip, self.port))
         self.sock.listen(5)  # Permitir hasta 5 conexiones en cola
+        self.running = True
         print(f"Central listening on {self.ip}:{self.port}")
 
     def shutDown(self):
         print("\nCerrando Central...")
+        self.running = False
         self.sock.close()
 
+    def authenticateTaxi(self, id_taxi):
+        conn = sqlite3.connect('central.db')
+        cursor = conn.cursor()
+
+        cursor.execute("SELECT status FROM taxis WHERE id = ?", (id_taxi,))
+        result = cursor.fetchone()
+
+        conn.close()
+        return result is not None  # Devuelve True si el taxi está registrado
+
     def listenTaxis(self):
-        while True:
-            conn, addr = self.sock.accept()
-            print(f"Taxi conectado desde {addr}")
+        while self.running:
+            try:
+                conn, addr = self.sock.accept()
+                print(f"Taxi conectado desde {addr}")
 
-            data = conn.recv(1024).decode("utf-8")
-            if data.startswith("AUTH#"):
-                taxi_id = data.split("#")[1]
-                print(f"Taxi {taxi_id} autenticado.")
-                conn.send("AUTH_OK".encode("utf-8"))
-            else:
-                print("Mensaje no reconocido")
+                data = conn.recv(1024).decode("utf-8")
+                if data.startswith("AUTH#"):
+                    taxi_id = data.split("#")[1]
+                    
+                    if self.authenticate_taxi(taxi_id):
+                        print(f"Taxi {taxi_id} autenticado correctamente.")
+                        conn.send("AUTH_OK".encode("utf-8"))
+                    else:
+                        print(f"Taxi {taxi_id} rechazado.")
+                        conn.send("AUTH_FAIL".encode("utf-8"))
 
-            conn.close()
+                conn.close()
+            except OSError:
+                break  # Sale del bucle si el socket se ha cerrado
 
 
 def handleExit(signum, frame):
@@ -109,6 +128,8 @@ def main():
 
     city_map = CityMap()
     city_map.loadMap("city_map.txt", sites)     # Cargar desde el archivo
+
+    print('\n########################################################################\n')
 
     # Crear objeto Central y lanzar su escucha en un hilo
     central = Central(5000)
