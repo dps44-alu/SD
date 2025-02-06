@@ -1,7 +1,7 @@
 import sqlite3
 import os
 
-DB_NAME = "taxis.db"
+DB_NAME = "central.db"
 
 def create_database():
     # Si la base de datos ya existe, la eliminamos
