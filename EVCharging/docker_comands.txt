@@ -1,0 +1,29 @@
+Parar contenedores sin borrarlos:
+    docker-compose stop
+
+Parar y borrar contenedores, red y dependencias:
+    docker-compose down
+
+Levantar (reconstruyendo imágenes si cambiaste el Dockerfile o requirements):
+    docker-compose up --build
+
+Levantar en segundo plano (modo “detached”):
+    docker-compose up -d --build
+
+Ver logs de todos:
+    docker-compose logs -f
+
+Ver logs de un servicio:
+    docker logs -f ev_central
+
+Recargar el nuevo código, se para y arranca solo ese servicio:
+    docker-compose restart ev_central
+    o
+    docker-compose up ev_central
+
+
+Flujo:
+    docker-compose up -d                # Levantar todo al principio
+    docker-compose restart ev_central   # Probar cambio en un servicio
+    docker-compose up --build           # Si cambia el Dockerfile
+
