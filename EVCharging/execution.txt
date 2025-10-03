@@ -1,0 +1,14 @@
+docker compose up -d 
+
+docker compose down
+
+docker ps
+
+CENTRAL_PORT --- BROKER_IP --- BROKER_PORT
+python3 EV_Central.py 5000 localhost 9092
+
+BROKER_IP --- BROKER_PORT
+python3 EV_CP_E.py localhost 9092
+
+ENGINE_IP --- ENGINE_PORT --- CENTRAL_IP --- CENTRAL_PORT --- CP_ID
+python3 EV_CP_M.py localhost 6000 localhost 5000 ALC1

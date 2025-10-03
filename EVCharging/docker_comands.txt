@@ -1,3 +1,6 @@
+Para ver el estado:
+    docker ps -a
+
 Parar contenedores sin borrarlos:
     docker-compose stop
 
@@ -26,4 +29,6 @@ Flujo:
     docker-compose up -d                # Levantar todo al principio
     docker-compose restart ev_central   # Probar cambio en un servicio
     docker-compose up --build           # Si cambia el Dockerfile
+
+
 

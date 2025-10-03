@@ -1,80 +1,25 @@
-version: "3.9"
+version: "3.8"
+
 services:
-  # Zookeeper
   zookeeper:
     image: confluentinc/cp-zookeeper:7.5.0
+    container_name: zookeeper
     environment:
       ZOOKEEPER_CLIENT_PORT: 2181
       ZOOKEEPER_TICK_TIME: 2000
     ports:
       - "2181:2181"
-    networks:
-      - evnet
 
-  # Kafka
   kafka:
     image: confluentinc/cp-kafka:7.5.0
+    container_name: kafka
+    depends_on:
+      - zookeeper
     environment:
       KAFKA_BROKER_ID: 1
       KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
-      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://localhost:9092
       KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT
       KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
     ports:
       - "9092:9092"
-    depends_on:
-      - zookeeper
-    networks:
-      - evnet
-
-  # EV_Central
-  ev_central:
-    build: ./EV_Central
-    container_name: ev_central
-    command: ["python3", "EV_Central.py"]
-    volumes:
-      - ./EV_Central:/app
-    networks:
-      - evnet
-    depends_on:
-      - kafka
-
-  # EV_CP (engine)
-  ev_cp1:
-    build: ./EV_CP
-    container_name: ev_cp1
-    command: ["python3", "EV_CP_E.py"]
-    volumes:
-      - ./EV_CP:/app
-    networks:
-      - evnet
-    depends_on:
-      - ev_central
-
-  # EV_CP (monitor)
-  ev_cp1_monitor:
-    build: ./EV_CP
-    container_name: ev_cp1_monitor
-    command: ["python3", "EV_CP_M.py"]
-    volumes:
-      - ./EV_CP:/app
-    networks:
-      - evnet
-    depends_on:
-      - ev_cp1
-
-  # EV_Driver
-  ev_driver1:
-    build: ./EV_Driver
-    container_name: ev_driver1
-    command: ["python3", "EV_Driver.py"]
-    volumes:
-      - ./EV_Driver:/app
-    networks:
-      - evnet
-    depends_on:
-      - ev_central
-
-networks:
-  evnet:
-    driver: bridge
