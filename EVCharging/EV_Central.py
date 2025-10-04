@@ -125,7 +125,7 @@ def main(central_port, broker_ip, broker_port):
                     msg = data.decode()
                     print(f"[Central] Mensaje: {msg}")
 
-                    type, cp_id, cp_address, cp_price, cp_status = msg.split("_") 
+                    type, cp_id, cp_address, cp_price, cp_status = msg.split("#") 
 
                     if type == "AUTH":
                         if cp_authentication(conn, cp_id, cp_address, cp_price, cp_status):

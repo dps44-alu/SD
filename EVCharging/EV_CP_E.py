@@ -1,4 +1,5 @@
 import sys
+import time
 import socket
 import threading
 
@@ -12,6 +13,21 @@ def args():
     return sys.argv[1], int(sys.argv[2])
 
 
+def simulate_failure():
+    global CP_STATUS
+    CP_STATUS = "OUT_OF_ORDER"
+    print("[Engine] Estado cambiado manualmente a OUT_OF_ORDER (durante 3s)")
+    time.sleep(3)
+    CP_STATUS = "ACTIVE"
+    print("[Engine] Estado restaurado automáticamente a ACTIVE")
+
+
+def listen_keyboard():
+    while True:
+        input("Pulsa ENTER para simular KO temporal (3s): ")
+        threading.Thread(target=simulate_failure, daemon=True).start()
+
+
 def handle_client(conn, addr):
     print(f"[Engine] Conexión desde {addr}")
 
@@ -22,7 +38,7 @@ def handle_client(conn, addr):
                 break
             
             msg = data.decode()
-            type, cp_id = msg.split("_") 
+            type, cp_id = msg.split("#") 
 
             print(f"[Engine] Recibido de {cp_id}: {msg}")
 
@@ -36,6 +52,9 @@ def handle_client(conn, addr):
 
 
 def main(broker_ip, broker_port):
+
+    threading.Thread(target=listen_keyboard, daemon=True).start()
+
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as server:
         server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         server.bind((ENGINE_IP, ENGINE_PORT))

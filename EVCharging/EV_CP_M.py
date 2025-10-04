@@ -19,7 +19,7 @@ def connect_central(central_ip, central_port, cp_id):
     print(f"[Monitor] Conectado a Central {central_ip}:{central_port}")
 
     # Enviar AUTH al central con estado inicial
-    msg = f"AUTH_{cp_id}_{CP_ADDRESS}_{CP_PRICE}_{CP_STATUS}"
+    msg = f"AUTH#{cp_id}#{CP_ADDRESS}#{CP_PRICE}#{CP_STATUS}"
     central_conn.sendall(msg.encode())
 
     # Esperar respuesta de Central
@@ -43,7 +43,7 @@ def connect_engine(central_conn, engine_ip, engine_port, cp_id):
 
         while True:
             try:
-                msg = f"STATUS_{cp_id}"
+                msg = f"STATUS#{cp_id}"
                 client.sendall(msg.encode())
                 new_status = client.recv(1024).decode()
                 print(f"[Monitor] Estado recibido de Engine: {new_status}")
@@ -53,7 +53,7 @@ def connect_engine(central_conn, engine_ip, engine_port, cp_id):
                     CP_STATUS = new_status
 
                     # Notificar a Central
-                    msg = f"CHANGE_{cp_id}_{new_status}"
+                    msg = f"CHANGE#{cp_id}#None#None#{new_status}"
                     central_conn.sendall(msg.encode())
 
                 time.sleep(1)
