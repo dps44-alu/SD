@@ -4,14 +4,20 @@
             "id": "ALC1",
             "address": "c/Alicante 1",
             "price": "0.5",
-            "status": "ACTIVE"
+            "status": "ACTIVE",
+            "driver": ""
         },
         {
             "id": "ALC2",
             "address": "c/Alicante 2",
             "price": "0.48",
-            "status": "INACTIVE"
+            "status": "INACTIVE",
+            "driver": ""
         }
     ],
-    "drivers": []
+    "drivers": [
+        {
+            "id": "Driver1"
+        }
+    ]
 }

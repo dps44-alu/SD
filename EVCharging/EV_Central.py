@@ -3,6 +3,7 @@ import socket
 import json
 import threading
 import tkinter as tk
+from kafka import KafkaProducer, KafkaConsumer
 
 
 CENTRAL_IP = "localhost"
@@ -23,11 +24,12 @@ def save_db(data):
     with open(DB_FILE, "w") as f:
         json.dump(data, f, indent=4)
 
-def update_charging_point(cp_id, new_status):
+def update_charging_point(cp_id, new_status, driver_id=""):
     db = load_db()
     for cp in db["charging_points"]:
         if cp["id"] == cp_id:
             cp["status"] = new_status
+            cp["driver"] = driver_id
             break
     save_db(db)
 
@@ -53,36 +55,86 @@ status_colors = {
 }
 
 
+labels = {}  # diccionario {cp_id: label}
+
 def create_panel():
     root = tk.Tk()
     root.title("SD EV Charging Solution - Monitorization Panel")
 
-    labels = []  # guardamos los labels para poder actualizarlos
+    rows, cols = 2, 3
+    cps = list_charging_points()
 
-    def refresh():
-        cps = list_charging_points()
-        for i, cp in enumerate(cps):
-            r = i // 3
-            c = i % 3
+    for i, cp in enumerate(cps):
+        r, c = i // cols, i % cols
 
-            text = f"{cp['id']}\n{cp['address']}\n{cp['price']}€/KWh"
-            color = status_colors.get(cp["status"], "white")  # si no se reconoce el estado = blanco
+        text = f"{cp['id']}\n{cp['address']}\n{cp['price']}€/KWh\n{cp.get('driver','')}"
+        color = status_colors.get(cp["status"], "grey")
 
-            if i < len(labels):
-                labels[i].config(text=text, bg=color)   # actualizar label existente
-            else:
-                # crear label nuevo
-                label = tk.Label(root, text=text, bg=color, fg="white",
-                                 font=("Arial", 12), width=20, height=6,
-                                 relief="raised", borderwidth=2)
-                label.grid(row=r, column=c, padx=5, pady=5, sticky="nsew")
-                labels.append(label)
+        label = tk.Label(root, text=text, bg=color, fg="white",
+                         font=("Arial", 12), width=20, height=6,
+                         relief="raised", borderwidth=2)
+        label.grid(row=r, column=c, padx=5, pady=5, sticky="nsew")
 
-        root.after(2000, refresh)   # volver a refrescar cada 2 segundos
+        labels[cp["id"]] = label
 
-    refresh()
+    root.after(2000, refresh_panel, root)
     root.mainloop()
 
+def refresh_panel(root):
+    cps = list_charging_points()
+    for cp in cps:
+        label = labels.get(cp["id"])
+        if label:
+            text = f"{cp['id']}\n{cp['address']}\n{cp['price']}€/KWh\n{cp.get('driver','')}"
+            color = status_colors.get(cp["status"], "grey")
+            label.config(text=text, bg=color)
+    root.after(2000, refresh_panel, root)
+
+
+
+# ---------------------------
+# Kafka Drivers
+# ---------------------------
+def drivers_kafka_listener(broker_ip, broker_port):
+    consumer = KafkaConsumer(
+        "peticiones_conductores",
+        bootstrap_servers=f"{broker_ip}:{broker_port}",
+        value_deserializer=lambda v: v.decode("utf-8"),
+        group_id="central"
+    )
+
+    producer = KafkaProducer(
+        bootstrap_servers=f"{broker_ip}:{broker_port}",
+        value_serializer=lambda v: v.encode("utf-8")
+    )
+
+    print("[Central] Escuchando peticiones de drivers...")
+    for msg in consumer:
+        request = msg.value
+        print(f"[Central] Petición recibida: {request}")
+        parts = request.split("#")
+        type, driver_id, cp_id = parts
+
+        if type == "REQUEST":
+            available = False
+            cps = list_charging_points()
+            for cp in cps:
+                if cp["id"] == cp_id and cp["status"] == "ACTIVE":
+                    available = True
+                    update_charging_point(cp_id, "BUSY", driver_id)
+                    break
+
+            if available:
+                response = f"ACCEPTED#{driver_id}#{cp_id}"
+            else:
+                response = f"REJECTED#{driver_id}#{cp_id}"
+
+        elif type == "RELEASE":
+            update_charging_point(cp_id, "ACTIVE")
+            response = f"RELEASED#{driver_id}#{cp_id}"
+
+        producer.send("respuestas_central", response)
+        producer.flush()
 
 
 # ---------------------------
@@ -107,7 +159,7 @@ def cp_authentication(conn, cp_id, cp_address, cp_price, cp_status):
     return False
 
 
-def main(central_port, broker_ip, broker_port):
+def main(central_port):
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as server:
         server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         server.bind((CENTRAL_IP, central_port))
@@ -159,4 +211,6 @@ if __name__ == "__main__":
 
     threading.Thread(target=create_panel, daemon=True).start()
 
-    main(central_port, broker_ip, broker_port)
+    threading.Thread(target=drivers_kafka_listener, args=(broker_ip, broker_port), daemon=True).start()
+
+    main(central_port)
