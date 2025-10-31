@@ -3,16 +3,20 @@
         {
             "id": "ALC1",
             "address": "c/Alicante 1",
-            "price": "0.5",
+            "price": 0.5,
             "status": "ACTIVE",
-            "driver": ""
+            "driver": "",
+            "kwh_consumed": 0,
+            "money_consumed": 0
         },
         {
             "id": "ALC2",
             "address": "c/Alicante 2",
-            "price": "0.48",
+            "price": 0.48,
             "status": "INACTIVE",
-            "driver": ""
+            "driver": "",
+            "kwh_consumed": 0,
+            "money_consumed": 0
         }
     ],
     "drivers": [

@@ -9,11 +9,16 @@ CP_ADDRESS = "c/Alicante 3"
 CP_PRICE = "0.5"
 
 
-def args():
+# ---------------------------
+# Monitor CP
+# ---------------------------
+# Lee argumentos
+def args ():
     return sys.argv[1], int(sys.argv[2]), sys.argv[3], int(sys.argv[4]), sys.argv[5]
 
 
-def connect_central(central_ip, central_port, cp_id):
+# Se conecta y autentica con central
+def connect_central (central_ip, central_port, cp_id):
     central_conn = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     central_conn.connect((central_ip, central_port))
     print(f"[Monitor] Conectado a Central {central_ip}:{central_port}")
@@ -34,39 +39,45 @@ def connect_central(central_ip, central_port, cp_id):
     return central_conn
 
 
-def connect_engine(central_conn, engine_ip, engine_port, cp_id):
+# Se conecta y monitoriza el Engine
+def connect_engine (central_conn, engine_ip, engine_port, cp_id):
     global CP_STATUS
 
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as client:
+        # Se conecta al Engine
         client.connect((engine_ip, engine_port))
         print(f"[Monitor] Conectado a Engine {engine_ip}:{engine_port}")
 
         while True:
             try:
+                # Pregunta el estado al Engine
                 msg = f"STATUS#{cp_id}"
                 client.sendall(msg.encode())
                 new_status = client.recv(1024).decode()
                 print(f"[Monitor] Estado recibido de Engine: {new_status}")
 
+                # Si ha cambiado, notifica a Central
                 if new_status and new_status != CP_STATUS:
                     print(f"[Monitor] Cambio detectado: {CP_STATUS} → {new_status}")
                     CP_STATUS = new_status
 
-                    # Notificar a Central
+                    # Notifica a Central
                     msg = f"CHANGE#{cp_id}#None#None#{new_status}"
                     central_conn.sendall(msg.encode())
 
                 time.sleep(1)
+
             except Exception as e:
                 print(f"[Monitor] Error con Engine: {e}")
                 break
 
 
-def main(engine_ip, engine_port, central_ip, central_port, cp_id):
+# Inicia la conexión con Central y el Engine
+def main (engine_ip, engine_port, central_ip, central_port, cp_id):
     central_conn = connect_central(central_ip, central_port, cp_id)
 
     # Crear hilo para monitorizar Engine
-    threading.Thread(target=connect_engine, args=(central_conn, engine_ip, engine_port, cp_id), daemon=True).start()
+    threading.Thread(target = connect_engine, args = (central_conn, engine_ip, engine_port, cp_id), daemon = True).start()
 
     # Mantener CP_M vivo
     while True:
@@ -76,6 +87,7 @@ def main(engine_ip, engine_port, central_ip, central_port, cp_id):
             break
 
 
+# Inicia el programa
 if __name__ == "__main__":
     engine_ip, engine_port, central_ip, central_port, cp_id = args()
     main(engine_ip, engine_port, central_ip, central_port, cp_id)
