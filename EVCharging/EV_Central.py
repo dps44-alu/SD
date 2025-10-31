@@ -9,31 +9,35 @@ from kafka import KafkaProducer, KafkaConsumer
 
 CENTRAL_IP = "localhost"
 DB_FILE = "db.json"
-LABELS = {}                         # Diccionario de etiquetas Tkinter
-ACTIVE_CONSUMPTION_THREADS = {}     # Hilos de consumo activos
+LABELS = {}
+DB_LOCK = threading.Lock()  # Lock para acceso seguro a la BD
 
 
 # ---------------------------
 # Funciones DB
 # ---------------------------
-# Carga y guarda la base de datos de CPs
-def load_db ():
-    try:
-        with open(DB_FILE, "r") as f:
-            return json.load(f)
-        
-    except FileNotFoundError:
-        return {"charging_points": [], "drivers": []}
+def load_db():
+    with DB_LOCK:
+        try:
+            with open(DB_FILE, "r") as f:
+                content = f.read()
+                if not content.strip():  # Si el archivo está vacío
+                    return {"charging_points": [], "drivers": []}
+                return json.loads(content)
+        except FileNotFoundError:
+            return {"charging_points": [], "drivers": []}
+        except json.JSONDecodeError:
+            print("[Central] ⚠️ Error leyendo BD, retornando BD vacía")
+            return {"charging_points": [], "drivers": []}
 
 
-# Guarda la base de datos de CPs
-def save_db (data):
-    with open(DB_FILE, "w") as f:
-        json.dump(data, f, indent=4)
+def save_db(data):
+    with DB_LOCK:
+        with open(DB_FILE, "w") as f:
+            json.dump(data, f, indent=4)
 
 
-# Actualiza la información de un CP
-def update_charging_point (cp_id, new_status, driver_id = "", kwh_consumed = 0, money_consumed = 0):
+def update_charging_point(cp_id, new_status, driver_id="", kwh_consumed=0, money_consumed=0):
     db = load_db()
     for cp in db["charging_points"]:
         if cp["id"] == cp_id:
@@ -42,22 +46,18 @@ def update_charging_point (cp_id, new_status, driver_id = "", kwh_consumed = 0, 
             cp["kwh_consumed"] = kwh_consumed
             cp["money_consumed"] = money_consumed
             break
-
     save_db(db)
 
 
-# Devuelve un CP
-def get_charging_point (cp_id):
+def get_charging_point(cp_id):
     db = load_db()
     for cp in db["charging_points"]:
         if cp["id"] == cp_id:
             return cp
-        
     return None
 
 
-# Añade un nuevo CP
-def add_charging_point (cp_id, address, price, status):
+def add_charging_point(cp_id, address, price, status):
     db = load_db()
     db["charging_points"].append({
         "id": cp_id, 
@@ -68,21 +68,17 @@ def add_charging_point (cp_id, address, price, status):
         "kwh_consumed": 0,
         "money_consumed": 0
     })
-
     save_db(db)
 
 
-# Devuelve todos los CPs
-def list_charging_points ():
+def list_charging_points():
     db = load_db()
     return db["charging_points"]
-
 
 
 # ---------------------------
 # Panel Tkinter
 # ---------------------------
-# Colores de estado
 status_colors = {
     "ACTIVE": "green",
     "OUT_OF_ORDER": "orange",
@@ -92,8 +88,7 @@ status_colors = {
 }
 
 
-# Crea el panel de monitorización
-def create_panel ():
+def create_panel():
     global LABELS
 
     root = tk.Tk()
@@ -112,10 +107,10 @@ def create_panel ():
         
         color = status_colors.get(cp["status"], "grey")
 
-        label = tk.Label(root, text = text, bg = color, fg = "white",
-                         font = ("Arial", 12), width = 20, height = 8,
-                         relief = "raised", borderwidth = 2)
-        label.grid(row = r, column = c, padx = 5, pady = 5, sticky = "nsew")
+        label = tk.Label(root, text=text, bg=color, fg="white",
+                         font=("Arial", 12), width=20, height=8,
+                         relief="raised", borderwidth=2)
+        label.grid(row=r, column=c, padx=5, pady=5, sticky="nsew")
 
         LABELS[cp["id"]] = label
 
@@ -123,8 +118,7 @@ def create_panel ():
     root.mainloop()
 
 
-# Refresca el panel periódicamente
-def refresh_panel (root):
+def refresh_panel(root):
     cps = list_charging_points()
     for cp in cps:
         label = LABELS.get(cp["id"])
@@ -135,63 +129,84 @@ def refresh_panel (root):
                 text = f"{cp['id']}\n{cp['address']}\n{cp['price']}€/kWh\n{cp['driver']}"
 
             color = status_colors.get(cp["status"], "grey")
-            label.config(text = text, bg = color)
+            label.config(text=text, bg=color)
     
     root.after(500, refresh_panel, root)
 
 
-# Calcula y envía actualizaciones de consumo cada segundo
-def consumption_updater (producer, driver_id, cp_id, duration = 5):
-    global ACTIVE_CONSUMPTION_THREADS
-
-    cp = get_charging_point(cp_id)
-    if not cp:
-        return
+# ---------------------------
+# Kafka - Escuchar consumo de CPs
+# ---------------------------
+def listen_cp_consumption(broker_ip, broker_port):
+    """Escucha las actualizaciones de consumo que envían los CPs"""
+    consumer = KafkaConsumer(
+        "consumo_cps",
+        bootstrap_servers=f"{broker_ip}:{broker_port}",
+        value_deserializer=lambda v: v.decode("utf-8"),
+        group_id="central-consumption"
+    )
     
-    price = float(cp["price"])
-    total_kwh = 0
-    total_cost = 0
+    producer = KafkaProducer(
+        bootstrap_servers=f"{broker_ip}:{broker_port}",
+        value_serializer=lambda v: v.encode("utf-8")
+    )
     
-    for i in range(duration):
-        time.sleep(1)
-        total_kwh += 1
-        total_cost += price
-
-        # Actualiza el consumo en la base de datos
-        update_charging_point(cp_id, "BUSY", driver_id, total_kwh, total_cost)
+    print("[Central] Escuchando actualizaciones de consumo de CPs...")
+    
+    for msg in consumer:
+        consumption = msg.value
+        print(f"[Central] Actualización recibida: {consumption}")
+        parts = consumption.split("#")
         
-        # Envia la actualización al conductor
-        consumption_msg = f"CONSUMPTION#{driver_id}#{cp_id}#{total_kwh:.2f}#{total_cost:.2f}"
-        producer.send("respuestas_central", consumption_msg)
-        producer.flush()
-        print(f"[Central] Enviando consumo a {driver_id}: {total_kwh:.2f} kWh, {total_cost:.2f}€")
-    
-    # Limpia el hilo del diccionario cuando termina
-    if cp_id in ACTIVE_CONSUMPTION_THREADS:
-        del ACTIVE_CONSUMPTION_THREADS[cp_id]
+        if parts[0] == "CONSUMPTION":
+            driver_id = parts[1]
+            cp_id = parts[2]
+            kwh = float(parts[3])
+            cost = float(parts[4])
+            
+            # Actualizar BD
+            update_charging_point(cp_id, "BUSY", driver_id, kwh, cost)
+            
+            # Reenviar al driver
+            producer.send("respuestas_central", consumption)
+            producer.flush()
+            print(f"[Central] Consumo reenviado al driver: {kwh:.2f} kWh, {cost:.2f}€")
+            
+        elif parts[0] == "CHARGE_END":
+            driver_id = parts[1]
+            cp_id = parts[2]
+            kwh = float(parts[3])
+            cost = float(parts[4])
+            
+            print(f"[Central] Carga finalizada en {cp_id}: {kwh:.2f} kWh, {cost:.2f}€")
 
+            update_charging_point(cp_id, "ACTIVE")
+            
+            # Enviar ticket final al driver
+            ticket = f"TICKET#{driver_id}#{cp_id}#{kwh:.2f}#{cost:.2f}"
+            producer.send("respuestas_central", ticket)
+            producer.flush()
 
 
 # ---------------------------
-# Kafka Drivers
+# Kafka - Drivers
 # ---------------------------
-# Escucha las peticiones de los conductores
-def handle_driver (broker_ip, broker_port):
-    global ACTIVE_CONSUMPTION_THREADS
-
+def handle_driver(broker_ip, broker_port):
+    """Escucha peticiones de drivers y delega al CP correspondiente"""
     consumer = KafkaConsumer(
         "peticiones_conductores",
-        bootstrap_servers = f"{broker_ip}:{broker_port}",
-        value_deserializer = lambda v: v.decode("utf-8"),
-        group_id = "central"
+        bootstrap_servers=f"{broker_ip}:{broker_port}",
+        value_deserializer=lambda v: v.decode("utf-8"),
+        group_id="central"
     )
 
     producer = KafkaProducer(
-        bootstrap_servers = f"{broker_ip}:{broker_port}",
-        value_serializer = lambda v: v.encode("utf-8")
+        bootstrap_servers=f"{broker_ip}:{broker_port}",
+        value_serializer=lambda v: v.encode("utf-8")
     )
 
     print("[Central] Escuchando peticiones de drivers...")
+    
     for msg in consumer:
         request = msg.value
         print(f"[Central] Petición recibida: {request}")
@@ -202,31 +217,26 @@ def handle_driver (broker_ip, broker_port):
 
         if msg_type == "REQUEST":
             duration = int(parts[3])
-            available = False
-            cps = list_charging_points()
-            for cp in cps:
-                if cp["id"] == cp_id and cp["status"] == "ACTIVE":
-                    available = True
-                    update_charging_point(cp_id, "BUSY", driver_id)
-                    
-                    # Iniciar hilo para enviar actualizaciones de consumo
-                    consumption_thread = threading.Thread(
-                        target = consumption_updater,
-                        args = (producer, driver_id, cp_id, duration),
-                        daemon = True
-                    )
-
-                    ACTIVE_CONSUMPTION_THREADS[cp_id] = consumption_thread
-                    consumption_thread.start()
-                    break
-
-            if available:
+            cp = get_charging_point(cp_id)
+            
+            if cp and cp["status"] == "ACTIVE":
+                # Marcar como BUSY
+                update_charging_point(cp_id, "BUSY", driver_id)
+                
+                # Enviar petición al CP Engine para que inicie la carga
+                charge_request = f"START_CHARGE#{driver_id}#{cp_id}#{duration}"
+                producer.send("peticiones_carga", charge_request)
+                producer.flush()
+                print(f"[Central] Petición enviada al CP {cp_id}")
+                
+                # Confirmar al driver
                 response = f"ACCEPTED#{driver_id}#{cp_id}"
+                producer.send("respuestas_central", response)
+                producer.flush()
             else:
                 response = f"REJECTED#{driver_id}#{cp_id}"
-            
-            producer.send("respuestas_central", response)
-            producer.flush()
+                producer.send("respuestas_central", response)
+                producer.flush()
 
         elif msg_type == "RELEASE":
             update_charging_point(cp_id, "ACTIVE", "")
@@ -235,36 +245,31 @@ def handle_driver (broker_ip, broker_port):
             producer.flush()
 
 
-
 # ---------------------------
 # Servidor Central
 # ---------------------------
-# Lee argumentos
-def args ():
+def args():
     return int(sys.argv[1]), sys.argv[2], int(sys.argv[3])
 
 
-# Resetea el estado de todos los CPs a INACTIVE al iniciar Central
-def reset_charging_points ():
+def reset_charging_points():
     db = load_db()
     for cp in db["charging_points"]:
         cp["status"] = "INACTIVE"
         cp["driver"] = ""
         cp["kwh_consumed"] = 0
+        cp["money_consumed"] = 0
     save_db(db)
 
 
-# Autentica un CP
-def cp_authentication (conn, cp_id, cp_address, cp_price, cp_status):
+def cp_authentication(conn, cp_id, cp_address, cp_price, cp_status):
     for cp in list_charging_points():
         if cp["id"] == cp_id:
             return True
-    
     return False
 
 
-# Servidor principal de Central
-def main (central_port):
+def main(central_port):
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as server:
         server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         server.bind((CENTRAL_IP, central_port))
@@ -286,7 +291,7 @@ def main (central_port):
 
                     if type == "AUTH":
                         if cp_authentication(conn, cp_id, cp_address, cp_price, cp_status):
-                            print(f"[Central] CP autenticado: {cp_id}")
+                            print(f"[Central] CP autenticado: {cp_id} con precio {cp_price}€/kWh")
                             conn.sendall(b"ACCEPTED")
                             update_charging_point(cp_id, cp_status)
                         else:
@@ -300,7 +305,7 @@ def main (central_port):
                                 print(f"[Central] CP denegado por dirección repetida: {cp_id}")
                                 conn.sendall(b"REJECTED")
                             else:
-                                print(f"[Central] CP registrado: {cp_id}")
+                                print(f"[Central] CP registrado: {cp_id} con precio {cp_price}€/kWh")
                                 conn.sendall(b"ACCEPTED")
                                 add_charging_point(cp_id, cp_address, cp_price, cp_status)
 
@@ -323,8 +328,12 @@ if __name__ == "__main__":
 
     reset_charging_points()
 
-    threading.Thread(target = create_panel, daemon = True).start()
-
-    threading.Thread(target = handle_driver, args = (broker_ip, broker_port), daemon = True).start()
+    threading.Thread(target=create_panel, daemon=True).start()
+    
+    # Escuchar peticiones de drivers
+    threading.Thread(target=handle_driver, args=(broker_ip, broker_port), daemon=True).start()
+    
+    # Escuchar actualizaciones de consumo de los CPs
+    threading.Thread(target=listen_cp_consumption, args=(broker_ip, broker_port), daemon=True).start()
 
     main(central_port)
