@@ -8,22 +8,23 @@ from kafka import KafkaProducer
 ENGINE_IP = "0.0.0.0"
 ENGINE_PORT = 6000      
 CP_STATUS = "ACTIVE"
-CP_PRICE = 0.5                  # Precio definido en el Engine
-CP_ADDRESS = "c/Alicante 1"     # Dirección definida en el Engine
+CP_PRICE = None
+CP_ADDRESS = None
 CP_ID = None
 CURRENT_DRIVER = None
 CHARGING_ACTIVE = False
+CONFIG_RECEIVED = False
+CURRENT_KWH = 0.0
+CURRENT_COST = 0.0
 
 
 # ---------------------------
 # Engine CP
 # ---------------------------
-# Lee argumentos
 def args():
     return sys.argv[1], int(sys.argv[2])
 
 
-# Simula un fallo temporal
 def simulate_failure():
     global CP_STATUS
     CP_STATUS = "OUT_OF_ORDER"
@@ -33,31 +34,40 @@ def simulate_failure():
     print("\n[Engine] Estado restaurado automáticamente a ACTIVE")
 
 
-# Escucha el teclado para simular un fallo temporal
 def listen_keyboard():
     while True:
-        input("Pulsa ENTER para simular KO temporal (3s): ")
+        input("[Engine] Pulsa ENTER para simular KO temporal (3s)\n")
         threading.Thread(target=simulate_failure, daemon=True).start()
 
 
-# Maneja el proceso de carga y envío de consumo
 def handle_charging(producer, driver_id, cp_id, duration):
-    global CHARGING_ACTIVE, CP_STATUS, CP_PRICE
+    global CHARGING_ACTIVE, CP_STATUS, CP_PRICE, CURRENT_DRIVER, CURRENT_KWH, CURRENT_COST
     
     CHARGING_ACTIVE = True
+    CURRENT_DRIVER = driver_id
     total_kwh = 0
     total_cost = 0
     
     print(f"[Engine] Iniciando carga para {driver_id} durante {duration}s a {CP_PRICE}€/kWh")
     
+    # Cambiar estado a BUSY
+    CP_STATUS = "BUSY"
+    
     for i in range(duration):
-        if CP_STATUS != "ACTIVE" or not CHARGING_ACTIVE:
-            print(f"[Engine] Carga interrumpida. Estado: {CP_STATUS}")
+        if not CHARGING_ACTIVE:
+            print(f"[Engine] Carga interrumpida externamente")
+            break
+            
+        if CP_STATUS == "OUT_OF_ORDER":
+            print(f"[Engine] Carga interrumpida por avería")
             break
             
         time.sleep(1)
         total_kwh += 1
         total_cost = total_kwh * CP_PRICE
+        
+        CURRENT_KWH = total_kwh
+        CURRENT_COST = total_cost
         
         # Enviar actualización de consumo a Central (para el panel)
         consumption_msg = f"CONSUMPTION#{driver_id}#{cp_id}#{total_kwh:.2f}#{total_cost:.2f}"
@@ -66,6 +76,12 @@ def handle_charging(producer, driver_id, cp_id, duration):
         print(f"[Engine] Consumo: {total_kwh:.2f} kWh, {total_cost:.2f}€")
     
     CHARGING_ACTIVE = False
+    CURRENT_DRIVER = None
+    CURRENT_KWH = 0.0
+    CURRENT_COST = 0.0
+    
+    # Volver a estado ACTIVE
+    CP_STATUS = "ACTIVE"
     
     # Notificar fin de carga
     end_msg = f"CHARGE_END#{driver_id}#{cp_id}#{total_kwh:.2f}#{total_cost:.2f}"
@@ -74,11 +90,9 @@ def handle_charging(producer, driver_id, cp_id, duration):
     print(f"[Engine] Carga finalizada. Total: {total_kwh:.2f} kWh, {total_cost:.2f}€")
 
 
-# Maneja la conexión con el monitor
-def handle_monitor(conn, addr):
-    global CP_ID, CP_PRICE, CP_ADDRESS, CP_STATUS
-    
-    print(f"[Engine] Conexión desde {addr}")
+def handle_monitor(conn, addr, producer):
+    global CP_ID, CP_PRICE, CP_ADDRESS, CP_STATUS, CONFIG_RECEIVED, CURRENT_DRIVER, CURRENT_KWH, CURRENT_COST
+    last_status = ""
 
     while True:
         try:
@@ -91,22 +105,62 @@ def handle_monitor(conn, addr):
             msg_type = parts[0]
 
             if msg_type == "STATUS":
-                cp_id = parts[1]
-                print(f"[Engine] Enviando estado a {cp_id}: {CP_STATUS}")
-                conn.sendall(CP_STATUS.encode())
+                # Enviar estado extendido: STATUS#driver_id#kwh#cost
+                driver_str = CURRENT_DRIVER if CURRENT_DRIVER else "None"
+                status_response = f"{CP_STATUS}#{driver_str}#{CURRENT_KWH:.2f}#{CURRENT_COST:.2f}"
                 
-            elif msg_type == "REQUEST_CONFIG":
-                # Monitor solicita toda la configuración del CP
+                if last_status != status_response:
+                    last_status = status_response
+                    print(f"[Engine] Enviando estado al Monitor: {status_response}")
+                
+                conn.sendall(status_response.encode())
+                
+            elif msg_type == "SET_CONFIG":
+                print(f"[Engine] Conexión desde {addr}")
                 cp_id = parts[1]
+                price = float(parts[2])
+                address = parts[3]
+                
                 CP_ID = cp_id
-                # Responder con toda la configuración: OK#precio#dirección#estado
-                response = f"OK#{CP_PRICE}#{CP_ADDRESS}#{CP_STATUS}"
-                conn.sendall(response.encode())
-                print(f"[Engine] Configuración enviada al Monitor:")
+                CP_PRICE = price
+                CP_ADDRESS = address
+                CONFIG_RECEIVED = True
+                
+                print(f"[Engine] Configuración recibida del Monitor:")
                 print(f"         ID: {CP_ID}")
                 print(f"         Dirección: {CP_ADDRESS}")
                 print(f"         Precio: {CP_PRICE}€/kWh")
                 print(f"         Estado: {CP_STATUS}")
+                
+                conn.sendall(b"CONFIG_OK")
+                
+            elif msg_type == "MANUAL_CHARGE":
+                # Formato: MANUAL_CHARGE#cp_id#driver_id#duration
+                cp_id = parts[1]
+                driver_id = parts[2]
+                duration = int(parts[3])
+                
+                if cp_id == CP_ID and CP_STATUS == "ACTIVE" and not CHARGING_ACTIVE:
+                    print(f"[Engine] Carga manual aceptada:")
+                    print(f"         Conductor: {driver_id}")
+                    print(f"         Duración: {duration}s")
+                    conn.sendall(b"CHARGE_ACCEPTED")
+                    
+                    # Notificar al conductor que se aceptó la carga
+                    accept_msg = f"ACCEPTED#{driver_id}#{cp_id}"
+                    producer.send("respuestas_central", accept_msg)
+                    producer.flush()
+                    
+                    # Iniciar carga con el driver_id proporcionado
+                    threading.Thread(
+                        target=handle_charging,
+                        args=(producer, driver_id, cp_id, duration),
+                        daemon=True
+                    ).start()
+                else:
+                    reason = "CP ocupado o no disponible"
+                    print(f"[Engine] Carga manual rechazada: {reason}")
+                    conn.sendall(reason.encode())
                 
         except Exception as e:
             print(f"[Engine] Error: {e}")
@@ -115,14 +169,13 @@ def handle_monitor(conn, addr):
     conn.close()
 
 
-# Escucha peticiones de carga desde Kafka
 def listen_charge_requests(producer, broker_ip, broker_port):
     from kafka import KafkaConsumer
     
-    # Esperar a que se configure el CP_ID
-    while CP_ID is None:
+    print("[Engine] Esperando configuración del Monitor...")
+    while not CONFIG_RECEIVED or CP_ID is None:
         time.sleep(0.5)
-    
+        
     consumer = KafkaConsumer(
         "peticiones_carga",
         bootstrap_servers=f"{broker_ip}:{broker_port}",
@@ -142,59 +195,53 @@ def listen_charge_requests(producer, broker_ip, broker_port):
             cp_id = parts[2]
             duration = int(parts[3])
             
-            if cp_id == CP_ID and CP_STATUS == "ACTIVE":
-                global CURRENT_DRIVER
-                CURRENT_DRIVER = driver_id
-                
+            if cp_id == CP_ID and CP_STATUS == "ACTIVE" and not CHARGING_ACTIVE:
                 # Confirmar inicio de carga
                 confirm_msg = f"CHARGE_STARTED#{driver_id}#{cp_id}"
                 producer.send("respuestas_engine", confirm_msg)
                 producer.flush()
                 
-                # Iniciar proceso de carga en un hilo separado
+                # Iniciar proceso de carga
                 threading.Thread(
                     target=handle_charging,
                     args=(producer, driver_id, cp_id, duration),
                     daemon=True
                 ).start()
+            else:
+                print(f"[Engine] Petición rechazada: CP no disponible o ya en uso")
 
 
-# Abre el socket y comienza a escuchar
 def main(broker_ip, broker_port):
-    # Inicializar Kafka Producer
     producer = KafkaProducer(
         bootstrap_servers=f"{broker_ip}:{broker_port}",
         value_serializer=lambda v: v.encode("utf-8")
     )
-    
-    print(f"[Engine] Iniciado con configuración:")
-    print(f"         Dirección: {CP_ADDRESS}")
-    print(f"         Precio: {CP_PRICE}€/kWh")
-    print(f"         Estado inicial: {CP_STATUS}")
-    
-    # Hilo para escuchar teclado
+
     threading.Thread(target=listen_keyboard, daemon=True).start()
     
-    # Hilo para escuchar peticiones de carga (esperará a que se configure CP_ID)
+    print(f"[Engine] Iniciado. Escuchando en {ENGINE_IP}:{ENGINE_PORT}")
+    print(f"         Estado inicial: {CP_STATUS}")
+    
     threading.Thread(
         target=listen_charge_requests, 
         args=(producer, broker_ip, broker_port), 
         daemon=True
     ).start()
 
-    # Servidor socket para Monitor
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as server:
         server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         server.bind((ENGINE_IP, ENGINE_PORT))
         server.listen()
-        print(f"[Engine] Escuchando en {ENGINE_IP}:{ENGINE_PORT}")
 
         while True:
             conn, addr = server.accept()
-            threading.Thread(target=handle_monitor, args=(conn, addr), daemon=True).start()
+            threading.Thread(
+                target=handle_monitor, 
+                args=(conn, addr, producer), 
+                daemon=True
+            ).start()
 
 
-# Inicia el programa
 if __name__ == "__main__":
     broker_ip, broker_port = args()
     main(broker_ip, broker_port)

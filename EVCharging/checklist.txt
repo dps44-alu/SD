@@ -1,0 +1,3 @@
+- Un conductor debe poder solicitar un CP desde el menú de este además de pasando por Central
+- En caso de fallo de un CP durante un suministro este deberá finalizar
+- Central debe poder activar y desactivar CPs desde un menú

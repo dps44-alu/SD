@@ -269,6 +269,85 @@ def cp_authentication(conn, cp_id, cp_address, cp_price, cp_status):
     return False
 
 
+def handle_monitor_connection(conn, addr):
+    """Maneja las conexiones de los monitores en un hilo separado"""
+    print(f"[Central] Conexión de Monitor desde {addr}")
+    try:
+        while True:
+            data = conn.recv(1024)
+            if not data:
+                break
+            msg = data.decode()
+            print(f"[Central] Mensaje de Monitor: {msg}")
+
+            parts = msg.split("#")
+            msg_type = parts[0]
+
+            # Manejar solicitud de configuración del Monitor
+            if msg_type == "REQUEST_CONFIG":
+                cp_id = parts[1]
+                cp = get_charging_point(cp_id)
+                
+                if cp:
+                    # Enviar configuración: CONFIG_OK#address#price#status
+                    response = f"CONFIG_OK#{cp['address']}#{cp['price']}#{cp['status']}"
+                    conn.sendall(response.encode())
+                    print(f"[Central] Configuración enviada al Monitor para CP {cp_id}:")
+                    print(f"          Dirección: {cp['address']}")
+                    print(f"          Precio: {cp['price']}€/kWh")
+                    print(f"          Estado: {cp['status']}")
+                else:
+                    # CP no encontrado en BD
+                    conn.sendall(b"CONFIG_NOT_FOUND")
+                    print(f"[Central] ⚠️ CP {cp_id} no encontrado en la base de datos")
+                continue
+
+            # Resto de mensajes (AUTH, CHANGE) requieren 5 partes
+            if len(parts) < 5:
+                continue
+                
+            cp_id = parts[1]
+            cp_address = parts[2]
+            cp_price = parts[3]
+            cp_status = parts[4]
+
+            if msg_type == "AUTH":
+                if cp_authentication(conn, cp_id, cp_address, cp_price, cp_status):
+                    print(f"[Central] CP autenticado: {cp_id} con precio {cp_price}€/kWh")
+                    conn.sendall(b"ACCEPTED")
+                    update_charging_point(cp_id, cp_status)
+                else:
+                    registered = False
+                    for cp in list_charging_points():
+                        if cp["address"] == cp_address:
+                            registered = True
+                            break 
+
+                    if registered:  
+                        print(f"[Central] CP denegado por dirección repetida: {cp_id}")
+                        conn.sendall(b"REJECTED")
+                    else:
+                        print(f"[Central] CP registrado: {cp_id} con precio {cp_price}€/kWh")
+                        conn.sendall(b"ACCEPTED")
+                        add_charging_point(cp_id, cp_address, cp_price, cp_status)
+
+            elif msg_type == "CHANGE":
+                if cp_authentication(conn, cp_id, cp_address, cp_price, cp_status):
+                    db = load_db()
+                    current_driver = ""
+                    for cp in db["charging_points"]:
+                        if cp["id"] == cp_id:
+                            current_driver = cp.get("driver", "")
+                            break
+                    
+                    update_charging_point(cp_id, cp_status, current_driver)
+                    print(f"[Central] Estado actualizado: {cp_id} → {cp_status}")
+    except Exception as e:
+        print(f"[Central] Error en conexión con Monitor: {e}")
+    finally:
+        conn.close()
+
+
 def main(central_port):
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as server:
         server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
@@ -278,48 +357,12 @@ def main(central_port):
 
         while True:
             conn, addr = server.accept()
-            with conn:
-                print(f"[Central] Conexión recibida de {addr}")
-                while True:
-                    data = conn.recv(1024)
-                    if not data:
-                        break
-                    msg = data.decode()
-                    print(f"[Central] Mensaje: {msg}")
-
-                    type, cp_id, cp_address, cp_price, cp_status = msg.split("#") 
-
-                    if type == "AUTH":
-                        if cp_authentication(conn, cp_id, cp_address, cp_price, cp_status):
-                            print(f"[Central] CP autenticado: {cp_id} con precio {cp_price}€/kWh")
-                            conn.sendall(b"ACCEPTED")
-                            update_charging_point(cp_id, cp_status)
-                        else:
-                            registered = False
-                            for cp in list_charging_points():
-                                if cp["address"] == cp_address:
-                                    registered = True
-                                    break 
-
-                            if registered:  
-                                print(f"[Central] CP denegado por dirección repetida: {cp_id}")
-                                conn.sendall(b"REJECTED")
-                            else:
-                                print(f"[Central] CP registrado: {cp_id} con precio {cp_price}€/kWh")
-                                conn.sendall(b"ACCEPTED")
-                                add_charging_point(cp_id, cp_address, cp_price, cp_status)
-
-                    elif type == "CHANGE":
-                        if cp_authentication(conn, cp_id, cp_address, cp_price, cp_status):
-                            db = load_db()
-                            current_driver = ""
-                            for cp in db["charging_points"]:
-                                if cp["id"] == cp_id:
-                                    current_driver = cp.get("driver", "")
-                                    break
-                            
-                            update_charging_point(cp_id, cp_status, current_driver)
-                            print(f"[Central] Estado actualizado: {cp_id} → {cp_status}")
+            # Crear un hilo para cada conexión de Monitor
+            threading.Thread(
+                target=handle_monitor_connection,
+                args=(conn, addr),
+                daemon=True
+            ).start()
 
 
 # Inicia el programa
