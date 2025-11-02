@@ -12,7 +12,7 @@ CP_ID = None
 CURRENT_DRIVER = None
 CHARGING_INFO = {"kwh": 0, "cost": 0}
 RUNNING = True
-PAUSED = False  # Flag para pausar la actualización de pantalla
+PAUSED = False
 
 
 def clear_screen():
@@ -37,7 +37,6 @@ def display_monitor_screen():
     global CP_ID, CP_ADDRESS, CP_PRICE, CP_STATUS, CURRENT_DRIVER, CHARGING_INFO, PAUSED
     
     while RUNNING:
-        # Solo actualizar si no está pausada
         if not PAUSED:
             clear_screen()
             
@@ -53,7 +52,6 @@ def display_monitor_screen():
             print(f"  Estado: {icon} {status_text} ({color_text})")
             print(f"{'='*70}")
             
-            # Mostrar información de carga si está activo
             if CP_STATUS == "BUSY" and CURRENT_DRIVER:
                 print(f"\n  📊 CARGA EN PROGRESO")
                 print(f"  {'-'*66}")
@@ -203,14 +201,12 @@ def connect_engine(central_conn, engine_ip, engine_port, cp_id):
                 parts = response.split("#")
                 new_status = parts[0]
                 
-                # Actualizar información de carga
                 if len(parts) >= 4:
                     new_driver = parts[1] if parts[1] != "None" else None
                     try:
                         new_kwh = float(parts[2])
                         new_cost = float(parts[3])
                         
-                        # Solo actualizar si hay cambios
                         if (new_driver != last_driver or 
                             new_kwh != last_charging_info["kwh"] or 
                             new_cost != last_charging_info["cost"]):
@@ -230,7 +226,6 @@ def connect_engine(central_conn, engine_ip, engine_port, cp_id):
                     last_driver = ""
                     last_charging_info = {"kwh": 0, "cost": 0}
 
-                # Si ha cambiado el estado, notificar a Central
                 if new_status and new_status != CP_STATUS:
                     print(f"[Monitor] Cambio detectado: {CP_STATUS} -> {new_status}")
                     print(f"          Notificando a Central...")
@@ -256,13 +251,13 @@ def handle_user_input(engine_ip, engine_port):
             user_input = input()
             
             if user_input.strip() == "1":
-                PAUSED = True  # Pausar actualización de pantalla
+                PAUSED = True
                 request_manual_charge(engine_ip, engine_port)
-                PAUSED = False  # Reanudar actualización
+                PAUSED = False
             elif user_input.strip() == "2":
-                PAUSED = True  # Pausar actualización de pantalla
+                PAUSED = True
                 show_detailed_status(engine_ip, engine_port)
-                PAUSED = False  # Reanudar actualización
+                PAUSED = False
             elif user_input.strip() == "0":
                 print(f"\n[Monitor] 👋 Cerrando Monitor...")
                 RUNNING = False
@@ -300,16 +295,19 @@ def request_manual_charge(engine_ip, engine_port):
         return
     
     # Solicitar duración
-    duration = input("  Duración de la carga en segundos [7]: ").strip()
+    duration_input = input("  Duración de la carga en segundos [10]: ").strip()
     
-    if not duration:
-        duration = 7
+    if not duration_input:
+        duration = 10
     else:
         try:
-            duration = int(duration)
+            duration = int(duration_input)
+            if duration <= 0:
+                print("  ⚠️  Duración inválida, usando 10 segundos")
+                duration = 10
         except ValueError:
-            print("  ❌ Duración inválida, usando 7 segundos")
-            duration = 7
+            print("  ⚠️  Duración inválida, usando 10 segundos")
+            duration = 10
     
     print(f"\n  ⚡ Solicitando carga manual:")
     print(f"     Conductor: {driver_id}")
@@ -321,7 +319,6 @@ def request_manual_charge(engine_ip, engine_port):
             client.settimeout(3)
             client.connect((engine_ip, engine_port))
             
-            # Enviar con driver_id real
             msg = f"MANUAL_CHARGE#{CP_ID}#{driver_id}#{duration}"
             client.sendall(msg.encode())
             
@@ -343,7 +340,6 @@ def show_detailed_status(engine_ip, engine_port):
     """Muestra el estado detallado con actualización en tiempo real"""
     global CP_ID, CP_ADDRESS, CP_PRICE, CP_STATUS, CURRENT_DRIVER, CHARGING_INFO, PAUSED
     
-    # Crear evento para detectar cuando el usuario presiona ENTER
     import select
     import sys
     
@@ -362,50 +358,46 @@ def show_detailed_status(engine_ip, engine_port):
         print(f"  Dirección: {CP_ADDRESS}")
         print(f"  Precio: {CP_PRICE}€/kWh")
         
-        # Mostrar estado con icono
         icon, status_text, color_text = get_status_display(CP_STATUS)
         print(f"  Estado actual: {icon} {status_text} ({color_text})")
         
         if CURRENT_DRIVER:
-            print(f"\n  📊 CARGA ACTIVA:")
+            print(f"\n  CARGA ACTIVA:")
             print(f"  {'-'*66}")
             print(f"     Conductor: {CURRENT_DRIVER}")
             print(f"     Consumo actual: {CHARGING_INFO['kwh']:.2f} kWh")
             print(f"     Importe acumulado: {CHARGING_INFO['cost']:.2f}€")
             print(f"  {'-'*66}")
         else:
-            print(f"\n  ⏸️  Sin carga activa")
+            print(f"\n  Sin carga activa")
         
-        print(f"\n  🔗 CONEXIÓN ENGINE:")
+        print(f"\n  CONEXIÓN ENGINE:")
         print(f"  {'-'*66}")
         print(f"     IP: {engine_ip}")
         print(f"     Puerto: {engine_port}")
         
-        # Intentar ping al Engine
         try:
             with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as client:
                 client.settimeout(2)
                 client.connect((engine_ip, engine_port))
-                print(f"     Estado: ✅ CONEXIÓN ACTIVA")
+                print(f"     Estado: CONEXIÓN ACTIVA")
         except Exception as e:
-            print(f"     Estado: ❌ ERROR DE CONEXIÓN")
+            print(f"     Estado: ERROR DE CONEXIÓN")
         
         print(f"  {'-'*66}")
         print(f"{'='*70}")
-        print(f"\n  ℹ️  Esta pantalla se actualiza cada segundo")
-        print(f"  👉 Presiona ENTER para volver al menú principal")
+        print(f"\n  Esta pantalla se actualiza cada segundo")
+        print(f"  Presiona ENTER para volver al menú principal")
         print(f"{'='*70}\n")
         
-        # Comprobar si hay entrada disponible (multiplataforma)
-        if os.name == 'nt':  # Windows
+        if os.name == 'nt':
             import msvcrt
             if msvcrt.kbhit():
                 key = msvcrt.getch()
-                if key == b'\r':  # ENTER en Windows
+                if key == b'\r':
                     running = False
-        else:  # Linux/Unix
+        else:
             import select
-            # Comprobar si hay entrada disponible sin bloquear
             i, o, e = select.select([sys.stdin], [], [], 0)
             if i:
                 line = sys.stdin.readline()
@@ -420,41 +412,33 @@ def main(engine_ip, engine_port, central_ip, central_port, cp_id):
     global CP_ID, RUNNING
     CP_ID = cp_id
     
-    # Paso 1: Solicitar configuración a Central
     print(f"[Monitor] Solicitando configuración a Central para CP: {cp_id}")
     if not get_config_from_central(central_ip, central_port, cp_id):
         print("[Monitor] Error crítico: no se pudo obtener la configuración de Central")
         return
     
-    # Paso 2: Enviar configuración al Engine
     print(f"[Monitor] Enviando configuración al Engine...")
     if not send_config_to_engine(engine_ip, engine_port, cp_id):
         print("[Monitor] Error crítico: no se pudo configurar el Engine")
         return
     
-    # Paso 3: Autenticarse con Central
     print(f"[Monitor] Autenticándose con Central...")
     central_conn = connect_central(central_ip, central_port, cp_id)
 
-    # Paso 4: Crear hilo para monitorizar Engine
     threading.Thread(
         target=connect_engine, 
         args=(central_conn, engine_ip, engine_port, cp_id), 
         daemon=True
     ).start()
 
-    # Paso 5: Sistema inicializado
     print(f"[Monitor] Sistema completamente inicializado para CP: {cp_id}")
     print(f"[Monitor] Iniciando pantalla de monitorización en tiempo real...")
     time.sleep(2)
     
-    # Paso 6: Iniciar pantalla de monitorización en hilo separado
     threading.Thread(target=display_monitor_screen, daemon=True).start()
     
-    # Paso 7: Manejar entrada del usuario
     handle_user_input(engine_ip, engine_port)
     
-    # Cerrar conexiones
     RUNNING = False
     central_conn.close()
     print(f"  ✅ Monitor {cp_id} finalizado correctamente.\n")

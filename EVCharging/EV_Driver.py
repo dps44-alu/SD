@@ -4,7 +4,7 @@ import threading
 from kafka import KafkaProducer, KafkaConsumer
 
 
-CHARGE_DURATION = 7  # Segundos de carga simulada
+CHARGE_DURATION_FILE = 10  # Duración estándar para cargas desde archivo
 
 
 class DriverTerminal:
@@ -16,8 +16,9 @@ class DriverTerminal:
         self.current_cp = None
         self.available_cps = {}
         self.running = True
-        self.manual_charge_active = False  # Nueva flag para cargas desde CP
-        self.last_consumption = {"kwh": 0, "cost": 0}  # Último consumo recibido
+        self.manual_charge_active = False
+        self.last_consumption = {"kwh": 0, "cost": 0}
+        self.menu_blocked = False
         
         # Kafka Producer
         self.producer = KafkaProducer(
@@ -105,7 +106,11 @@ class DriverTerminal:
         
         # Mostrar CPs disponibles primero
         if self.available_cps:
-            print(f"\n  CPs disponibles: {', '.join([cp for cp, info in self.available_cps.items() if info['status'] == 'ACTIVE'])}")
+            active_cps = [cp for cp, info in self.available_cps.items() if info['status'] == 'ACTIVE']
+            if active_cps:
+                print(f"\n  CPs disponibles: {', '.join(active_cps)}")
+            else:
+                print(f"\n  ⚠️  No hay puntos de carga disponibles en este momento")
         
         cp_id = input("\n  Introduce el ID del Punto de Carga: ").strip()
         
@@ -114,7 +119,27 @@ class DriverTerminal:
             input("\n  Presiona ENTER para continuar...")
             return
         
-        self.request_charge(cp_id)
+        # Solicitar duración de la carga
+        duration_input = input("  Duración de la carga en segundos [10]: ").strip()
+        
+        if not duration_input:
+            duration = 10
+        else:
+            try:
+                duration = int(duration_input)
+                if duration <= 0:
+                    print("  ⚠️  Duración inválida, usando 10 segundos")
+                    duration = 10
+            except ValueError:
+                print("  ⚠️  Duración inválida, usando 10 segundos")
+                duration = 10
+        
+        print(f"\n  📋 Resumen de la solicitud:")
+        print(f"     Punto de carga: {cp_id}")
+        print(f"     Duración: {duration} segundos")
+        
+        self.menu_blocked = True
+        self.request_charge(cp_id, duration)
         
         # Esperar un momento para ver la respuesta
         print("\n  Esperando respuesta del sistema...")
@@ -127,6 +152,7 @@ class DriverTerminal:
             time.sleep(2)
             print("\n  Carga completada")
     
+        self.menu_blocked = False
         input("\n  Presiona ENTER para volver al menú...")
     
     def load_from_file(self):
@@ -159,6 +185,7 @@ class DriverTerminal:
             
             print(f"\n  Archivo cargado correctamente")
             print(f"  {len(cp_ids)} solicitudes encontradas: {', '.join(cp_ids)}")
+            print(f"  Duración estándar por carga: {CHARGE_DURATION_FILE} segundos")
             
             confirm = input("\n  ¿Deseas procesar todas las solicitudes? (s/n): ").strip().lower()
             
@@ -167,7 +194,9 @@ class DriverTerminal:
                 print(f"  (Este proceso puede tardar varios minutos)")
                 print(f"\n{'─'*60}\n")
                 
+                self.menu_blocked = True
                 self.process_cp_list(cp_ids)
+                self.menu_blocked = False
             
                 input("\n  Presiona ENTER para volver al menú...")
             else:
@@ -184,8 +213,8 @@ class DriverTerminal:
     def process_cp_list(self, cp_ids):
         """Procesar lista de CPs secuencialmente"""
         for i, cp_id in enumerate(cp_ids, 1):
-            print(f"  [{i}/{len(cp_ids)}] Procesando: {cp_id}")
-            self.request_charge(cp_id)
+            print(f"  [{i}/{len(cp_ids)}] Procesando: {cp_id} (duración: {CHARGE_DURATION_FILE}s)")
+            self.request_charge(cp_id, CHARGE_DURATION_FILE)
             
             while self.charging:
                 time.sleep(0.5)
@@ -199,13 +228,13 @@ class DriverTerminal:
         print(f"  TODAS LAS SOLICITUDES COMPLETADAS")
         print(f"{'='*60}\n")
     
-    def request_charge(self, cp_id):
+    def request_charge(self, cp_id, duration):
         """Enviar solicitud de carga"""
         self.charging = True
         self.current_cp = cp_id
         
-        request = f"REQUEST#{self.driver_id}#{cp_id}#{CHARGE_DURATION}"
-        print(f"  Enviando solicitud de carga a {cp_id}...")
+        request = f"REQUEST#{self.driver_id}#{cp_id}#{duration}"
+        print(f"  Enviando solicitud de carga a {cp_id} ({duration}s)...")
         self.producer.send("peticiones_conductores", request)
         self.producer.flush()
     
@@ -240,7 +269,7 @@ class DriverTerminal:
         
         if msg_type == "ACCEPTED":
             # Puede venir tanto de petición normal como de carga manual del CP
-            print(f"\n  ✅ Carga autorizada en {cp_id}")
+            print(f"\n\n  Carga autorizada en {cp_id}")
             print(f"  Iniciando proceso de carga...")
             
             # Si no estábamos esperando una carga, es porque fue iniciada desde el CP
@@ -248,6 +277,7 @@ class DriverTerminal:
                 print(f"  📍 Esta carga fue iniciada desde el punto de recarga")
                 self.charging = True
                 self.current_cp = cp_id
+                self.manual_charge_active = True
             
         elif msg_type == "REJECTED":
             print(f"  ❌ Carga RECHAZADA en {cp_id}")
@@ -274,6 +304,11 @@ class DriverTerminal:
                 print(f"  Energía consumida: {kwh:.2f} kWh")
                 print(f"  Importe total: {cost:.2f}€")
                 print(f"{'='*60}\n")
+                
+                # Si era una carga manual y el menú no está bloqueado por otra operación
+                if self.manual_charge_active and not self.menu_blocked:
+                    print(f"  Carga manual completada. Presiona ENTER para continuar...")
+                    self.manual_charge_active = False
                 
                 self.charging = False
                 self.current_cp = None
