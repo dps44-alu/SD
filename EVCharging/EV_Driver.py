@@ -4,7 +4,7 @@ import threading
 from kafka import KafkaProducer, KafkaConsumer
 
 
-CHARGE_DURATION_FILE = 10  # Duración estándar para cargas desde archivo
+CHARGE_DURATION_FILE = 10   # Duración estándar para cargas desde archivo
 
 
 class DriverTerminal:
@@ -47,13 +47,13 @@ class DriverTerminal:
         threading.Thread(target=self.listen_kafka, daemon=True).start()
         threading.Thread(target=self.update_cp_list, daemon=True).start()
     
+    # Limpiar pantalla (multiplataforma)
     def clear_screen(self):
-        """Limpiar pantalla (multiplataforma)"""
         import os
         os.system('cls' if os.name == 'nt' else 'clear')
     
+    # Mostrar menú principal
     def show_menu(self):
-        """Mostrar menú principal"""
         print(f"\n{'─'*60}")
         print(f"  MENÚ PRINCIPAL - Driver {self.driver_id}")
         print(f"{'─'*60}")
@@ -70,8 +70,8 @@ class DriverTerminal:
         print(f"  0. Salir")
         print(f"{'─'*60}")
     
+    # Mostrar lista de CPs disponibles
     def show_available_cps(self):
-        """Mostrar lista de CPs disponibles"""
         print(f"\n{'='*60}")
         print(f"  PUNTOS DE CARGA DISPONIBLES")
         print(f"{'='*60}")
@@ -92,8 +92,8 @@ class DriverTerminal:
         
         print(f"{'='*60}\n")
     
+    # Solicitar una carga única
     def request_single_charge(self):
-        """Solicitar una carga única"""
         print(f"\n{'─'*60}")
         print(f"  SOLICITAR CARGA ÚNICA")
         print(f"{'─'*60}")
@@ -110,7 +110,7 @@ class DriverTerminal:
             if active_cps:
                 print(f"\n  CPs disponibles: {', '.join(active_cps)}")
             else:
-                print(f"\n  ⚠️  No hay puntos de carga disponibles en este momento")
+                print(f"\n  No hay puntos de carga disponibles en este momento")
         
         cp_id = input("\n  Introduce el ID del Punto de Carga: ").strip()
         
@@ -128,13 +128,13 @@ class DriverTerminal:
             try:
                 duration = int(duration_input)
                 if duration <= 0:
-                    print("  ⚠️  Duración inválida, usando 10 segundos")
+                    print("  Duración inválida, usando 10 segundos")
                     duration = 10
             except ValueError:
-                print("  ⚠️  Duración inválida, usando 10 segundos")
+                print("  Duración inválida, usando 10 segundos")
                 duration = 10
         
-        print(f"\n  📋 Resumen de la solicitud:")
+        print(f"\n  Resumen de la solicitud:")
         print(f"     Punto de carga: {cp_id}")
         print(f"     Duración: {duration} segundos")
         
@@ -155,8 +155,8 @@ class DriverTerminal:
         self.menu_blocked = False
         input("\n  Presiona ENTER para volver al menú...")
     
+    # Cargar lista de CPs desde un archivo
     def load_from_file(self):
-        """Cargar lista de CPs desde un archivo"""
         print(f"\n{'─'*60}")
         print(f"  CARGAR DESDE ARCHIVO")
         print(f"{'─'*60}")
@@ -210,8 +210,8 @@ class DriverTerminal:
             print(f"  Error al leer el archivo: {e}")
             input("\n  Presiona ENTER para continuar...")
     
+    # Procesar lista de CPs secuencialmente
     def process_cp_list(self, cp_ids):
-        """Procesar lista de CPs secuencialmente"""
         for i, cp_id in enumerate(cp_ids, 1):
             print(f"  [{i}/{len(cp_ids)}] Procesando: {cp_id} (duración: {CHARGE_DURATION_FILE}s)")
             self.request_charge(cp_id, CHARGE_DURATION_FILE)
@@ -228,8 +228,8 @@ class DriverTerminal:
         print(f"  TODAS LAS SOLICITUDES COMPLETADAS")
         print(f"{'='*60}\n")
     
+    # Enviar solicitud de carga
     def request_charge(self, cp_id, duration):
-        """Enviar solicitud de carga"""
         self.charging = True
         self.current_cp = cp_id
         
@@ -238,8 +238,8 @@ class DriverTerminal:
         self.producer.send("peticiones_conductores", request)
         self.producer.flush()
     
+    # Escuchar mensajes de Kafka
     def listen_kafka(self):
-        """Escuchar mensajes de Kafka"""
         while self.running:
             try:
                 messages = self.consumer.poll(timeout_ms=500)
@@ -252,8 +252,8 @@ class DriverTerminal:
                 print(f"  Error en Kafka: {e}")
                 time.sleep(1)
     
+    # Procesar mensaje recibido
     def process_message(self, message):
-        """Procesar mensaje recibido"""
         parts = message.split("#")
         
         if len(parts) < 3:
@@ -274,13 +274,13 @@ class DriverTerminal:
             
             # Si no estábamos esperando una carga, es porque fue iniciada desde el CP
             if not self.charging:
-                print(f"  📍 Esta carga fue iniciada desde el punto de recarga")
+                print(f"  Esta carga fue iniciada desde el punto de recarga")
                 self.charging = True
                 self.current_cp = cp_id
                 self.manual_charge_active = True
             
         elif msg_type == "REJECTED":
-            print(f"  ❌ Carga RECHAZADA en {cp_id}")
+            print(f"  Carga RECHAZADA en {cp_id}")
             print(f"  Motivo: Punto de carga no disponible")
             self.charging = False
             self.current_cp = None
@@ -290,7 +290,7 @@ class DriverTerminal:
             if cp_id == self.current_cp:
                 kwh = float(parts[3])
                 cost = float(parts[4])
-                print(f"  ⚡ Consumo en tiempo real: {kwh:.2f} kWh | {cost:.2f}€")
+                print(f"  Consumo en tiempo real: {kwh:.2f} kWh | {cost:.2f}€")
             
         elif msg_type == "TICKET":
             # Solo procesar si es nuestro CP
@@ -298,7 +298,7 @@ class DriverTerminal:
                 kwh = float(parts[3])
                 cost = float(parts[4])
                 print(f"\n{'='*60}")
-                print(f"  🧾 TICKET FINAL DE CARGA")
+                print(f"  TICKET FINAL DE CARGA")
                 print(f"{'='*60}")
                 print(f"  Punto de carga: {cp_id}")
                 print(f"  Energía consumida: {kwh:.2f} kWh")
@@ -312,9 +312,33 @@ class DriverTerminal:
                 
                 self.charging = False
                 self.current_cp = None
+        
+        elif msg_type == "CHARGE_INTERRUPTED":
+            # Manejar carga interrumpida
+            if cp_id == self.current_cp or not self.current_cp:
+                kwh = float(parts[3])
+                cost = float(parts[4])
+                reason = parts[5] if len(parts) > 5 else "motivo desconocido"
+                
+                print(f"\n{'='*60}")
+                print(f"  CARGA INTERRUMPIDA")
+                print(f"{'='*60}")
+                print(f"  Punto de carga: {cp_id}")
+                print(f"  Motivo: {reason}")
+                print(f"  Energía consumida (parcial): {kwh:.2f} kWh")
+                print(f"  Importe cobrado: {cost:.2f}€")
+                print(f"{'='*60}\n")
+                
+                # Si era una carga manual y el menú no está bloqueado por otra operación
+                if self.manual_charge_active and not self.menu_blocked:
+                    print(f"  Presiona ENTER para continuar...")
+                    self.manual_charge_active = False
+                
+                self.charging = False
+                self.current_cp = None
     
+    # Actualizar lista de CPs disponibles desde BD
     def update_cp_list(self):
-        """Actualizar lista de CPs disponibles desde BD"""
         import json
         
         while self.running:
@@ -338,8 +362,8 @@ class DriverTerminal:
             
             time.sleep(2)
     
+    # Ejecutar el menú principal
     def run(self):
-        """Ejecutar el menú principal"""
         while self.running:
             try:
                 self.show_menu()
@@ -375,10 +399,9 @@ class DriverTerminal:
         print(f"  Driver {self.driver_id} finalizado correctamente.\n")
 
 
+# Leer argumentos de línea de comandos
 def args():
-    """Leer argumentos de línea de comandos"""
     if len(sys.argv) != 4:
-        print("Uso: python EV_Driver.py <broker_ip> <broker_port> <driver_id>")
         sys.exit(1)
     return sys.argv[1], sys.argv[2], sys.argv[3]
 

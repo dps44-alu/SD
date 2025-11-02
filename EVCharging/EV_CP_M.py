@@ -3,6 +3,7 @@ import socket
 import time
 import threading
 import os
+import select
 
 
 CP_STATUS = None
@@ -15,32 +16,32 @@ RUNNING = True
 PAUSED = False
 
 
+# Limpiar pantalla de forma multiplataforma
 def clear_screen():
-    """Limpiar pantalla de forma multiplataforma"""
     os.system('cls' if os.name == 'nt' else 'clear')
 
 
+# Obtener representación visual del estado
 def get_status_display(status):
-    """Obtener representación visual del estado"""
     status_map = {
-        "ACTIVE": ("🟢", "DISPONIBLE", "verde"),
-        "BUSY": ("🔵", "CARGANDO", "azul"),
-        "OUT_OF_ORDER": ("🟠", "FUERA DE SERVICIO", "naranja"),
-        "BROKEN": ("🔴", "AVERIADO", "rojo"),
-        "INACTIVE": ("⚪", "INACTIVO", "gris")
+        "ACTIVE": ("DISPONIBLE", "verde"),
+        "BUSY": ("CARGANDO", "azul"),
+        "OUT_OF_ORDER": ("FUERA DE SERVICIO", "naranja"),
+        "BROKEN": ("AVERIADO", "rojo"),
+        "INACTIVE": ("INACTIVO", "gris")
     }
-    return status_map.get(status, ("⚫", "DESCONOCIDO", "negro"))
+    return status_map.get(status, ("DESCONOCIDO", "negro"))
 
 
+# Mostrar pantalla de monitorización actualizada continuamente
 def display_monitor_screen():
-    """Mostrar pantalla de monitorización actualizada continuamente"""
     global CP_ID, CP_ADDRESS, CP_PRICE, CP_STATUS, CURRENT_DRIVER, CHARGING_INFO, PAUSED
     
     while RUNNING:
         if not PAUSED:
             clear_screen()
             
-            icon, status_text, color_text = get_status_display(CP_STATUS)
+            status_text, color_text = get_status_display(CP_STATUS)
             
             print(f"{'='*70}")
             print(f"  MONITOR CP - SISTEMA DE MONITORIZACIÓN EN TIEMPO REAL")
@@ -49,24 +50,25 @@ def display_monitor_screen():
             print(f"  Dirección: {CP_ADDRESS}")
             print(f"  Precio: {CP_PRICE}€/kWh")
             print(f"{'='*70}")
-            print(f"  Estado: {icon} {status_text} ({color_text})")
+            print(f"  Estado: {status_text} ({color_text})")
             print(f"{'='*70}")
             
             if CP_STATUS == "BUSY" and CURRENT_DRIVER:
-                print(f"\n  📊 CARGA EN PROGRESO")
+                print(f"\n  CARGA EN PROGRESO")
                 print(f"  {'-'*66}")
                 print(f"    Conductor: {CURRENT_DRIVER}")
                 print(f"    Consumo actual: {CHARGING_INFO['kwh']:.2f} kWh")
                 print(f"    Importe acumulado: {CHARGING_INFO['cost']:.2f}€")
                 print(f"  {'-'*66}")
             elif CP_STATUS == "ACTIVE":
-                print(f"\n  ✅ Punto de carga listo para recibir solicitudes")
+                print(f"\n  Punto de carga listo para recibir solicitudes")
             elif CP_STATUS == "OUT_OF_ORDER":
-                print(f"\n  ⚠️  Punto de carga fuera de servicio temporalmente")
+                print(f"\n  Punto de carga fuera de servicio temporalmente")
             elif CP_STATUS == "BROKEN":
-                print(f"\n  ❌ Punto de carga averiado - requiere atención")
+                print(f"\n  Punto de carga averiado - detenido por Central")
+                print(f"  Requiere comando RESUME para volver a operar")
             elif CP_STATUS == "INACTIVE":
-                print(f"\n  ⏸️  Punto de carga inactivo")
+                print(f"\n  ⸻ Punto de carga inactivo")
             
             print(f"\n{'='*70}")
             print(f"  CONTROLES:")
@@ -80,8 +82,8 @@ def display_monitor_screen():
         time.sleep(1)
 
 
+# Obtiene la configuración completa desde Central
 def get_config_from_central(central_ip, central_port, cp_id):
-    """Obtiene la configuración completa desde Central"""
     global CP_PRICE, CP_ADDRESS, CP_STATUS
     
     max_retries = 10
@@ -123,8 +125,8 @@ def get_config_from_central(central_ip, central_port, cp_id):
     return False
 
 
+# Envía la configuración al Engine
 def send_config_to_engine(engine_ip, engine_port, cp_id):
-    """Envía la configuración al Engine"""
     global CP_PRICE, CP_ADDRESS
     
     max_retries = 10
@@ -154,8 +156,8 @@ def send_config_to_engine(engine_ip, engine_port, cp_id):
     return False
 
 
+# Se conecta y autentica con central
 def connect_central(central_ip, central_port, cp_id):
-    """Se conecta y autentica con central"""
     global CP_PRICE, CP_ADDRESS, CP_STATUS
     
     central_conn = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -181,10 +183,68 @@ def connect_central(central_ip, central_port, cp_id):
     return central_conn
 
 
+# Escucha comandos de Central (STOP, RESUME) y los reenvía al Engine
+def listen_central_commands(central_conn, engine_ip, engine_port, cp_id):
+    global CP_STATUS, RUNNING
+    
+    print(f"[Monitor] Iniciando escucha de comandos de Central para CP {cp_id}...")
+    
+    while RUNNING:
+        try:
+            central_conn.settimeout(1.0)
+            data = central_conn.recv(1024)
+            
+            if not data:
+                print(f"[Monitor] Conexión con Central cerrada")
+                break
+                
+            msg = data.decode()
+            parts = msg.split("#")
+            
+            if len(parts) >= 3 and parts[0] == "COMMAND":
+                cmd_cp_id = parts[1]
+                command = parts[2]
+                
+                if cmd_cp_id == cp_id:
+                    print(f"\n[Monitor] Comando recibido de Central: {command}")
+                    
+                    # Reenviar comando al Engine
+                    try:
+                        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as engine_client:
+                            engine_client.settimeout(3)
+                            engine_client.connect((engine_ip, engine_port))
+                            engine_client.sendall(command.encode())
+                            
+                            # Esperar respuesta del Engine
+                            response = engine_client.recv(1024).decode()
+                            print(f"[Monitor] Respuesta del Engine: {response}")
+                            
+                            # Confirmar a Central
+                            central_conn.sendall(response.encode())
+                            
+                            # CORRECCIÓN: Actualizar estado según comando
+                            if command == "STOP":
+                                CP_STATUS = "BROKEN"  # Cambiar a BROKEN en lugar de OUT_OF_ORDER
+                                print(f"[Monitor] CP {cp_id} detenido - estado: BROKEN (Averiado)")
+                            elif command == "RESUME":
+                                CP_STATUS = "ACTIVE"
+                                print(f"[Monitor] CP {cp_id} reanudado - estado: ACTIVE")
+                                
+                    except Exception as e:
+                        print(f"[Monitor] Error reenviando comando al Engine: {e}")
+                        central_conn.sendall(b"ERROR")
+                        
+        except socket.timeout:
+            continue
+        except Exception as e:
+            if RUNNING:
+                print(f"[Monitor] Error escuchando comandos de Central: {e}")
+            break
+
+
+# Se conecta y monitoriza el Engine
 def connect_engine(central_conn, engine_ip, engine_port, cp_id):
-    """Se conecta y monitoriza el Engine"""
     global CP_STATUS, CURRENT_DRIVER, CHARGING_INFO, RUNNING
-    last_status = ""
     last_driver = ""
     last_charging_info = {"kwh": 0, "cost": 0}
 
@@ -230,7 +290,6 @@ def connect_engine(central_conn, engine_ip, engine_port, cp_id):
                     print(f"[Monitor] Cambio detectado: {CP_STATUS} -> {new_status}")
                     print(f"          Notificando a Central...")
                     CP_STATUS = new_status
-                    last_status = new_status
 
                     msg = f"CHANGE#{cp_id}#None#None#{new_status}"
                     central_conn.sendall(msg.encode())
@@ -242,8 +301,8 @@ def connect_engine(central_conn, engine_ip, engine_port, cp_id):
                 break
 
 
+# Maneja la entrada del usuario de forma no bloqueante
 def handle_user_input(engine_ip, engine_port):
-    """Maneja la entrada del usuario de forma no bloqueante"""
     global RUNNING, CP_ID, PAUSED
     
     while RUNNING:
@@ -259,20 +318,20 @@ def handle_user_input(engine_ip, engine_port):
                 show_detailed_status(engine_ip, engine_port)
                 PAUSED = False
             elif user_input.strip() == "0":
-                print(f"\n[Monitor] 👋 Cerrando Monitor...")
+                print(f"\n[Monitor] Cerrando Monitor...")
                 RUNNING = False
                 break
                 
         except KeyboardInterrupt:
-            print(f"\n\n[Monitor] ⚠️ Interrupción detectada. Cerrando...")
+            print(f"\n\n[Monitor] Interrupción detectada. Cerrando...")
             RUNNING = False
             break
         except:
             pass
 
 
+# Solicita una carga manual al Engine
 def request_manual_charge(engine_ip, engine_port):
-    """Solicita una carga manual al Engine"""
     global CP_ID, CP_STATUS
     
     clear_screen()
@@ -280,8 +339,11 @@ def request_manual_charge(engine_ip, engine_port):
     print(f"  SOLICITAR CARGA MANUAL")
     print(f"{'─'*70}")
     
-    if CP_STATUS != "ACTIVE":
-        print(f"  ⚠️  El CP no está disponible (Estado: {CP_STATUS})")
+    # Verificar tanto BROKEN como OUT_OF_ORDER
+    if CP_STATUS not in ["ACTIVE"]:
+        print(f"  El CP no está disponible (Estado: {CP_STATUS})")
+        if CP_STATUS == "BROKEN":
+            print(f"  El CP fue detenido por Central - requiere comando RESUME")
         print(f"  No se puede iniciar una carga manual")
         input("\n  Presiona ENTER para continuar...")
         return
@@ -290,7 +352,7 @@ def request_manual_charge(engine_ip, engine_port):
     driver_id = input("\n  ID del conductor: ").strip()
     
     if not driver_id:
-        print("  ❌ ID de conductor vacío. Operación cancelada.")
+        print("  ID de conductor vacío. Operación cancelada.")
         input("\n  Presiona ENTER para continuar...")
         return
     
@@ -303,13 +365,13 @@ def request_manual_charge(engine_ip, engine_port):
         try:
             duration = int(duration_input)
             if duration <= 0:
-                print("  ⚠️  Duración inválida, usando 10 segundos")
+                print("  Duración inválida, usando 10 segundos")
                 duration = 10
         except ValueError:
-            print("  ⚠️  Duración inválida, usando 10 segundos")
+            print("  Duración inválida, usando 10 segundos")
             duration = 10
     
-    print(f"\n  ⚡ Solicitando carga manual:")
+    print(f"\n  Solicitando carga manual:")
     print(f"     Conductor: {driver_id}")
     print(f"     Duración: {duration} segundos")
     print(f"     Enviando al Engine...")
@@ -325,19 +387,19 @@ def request_manual_charge(engine_ip, engine_port):
             response = client.recv(1024).decode()
             
             if response == "CHARGE_ACCEPTED":
-                print(f"  ✅ Solicitud aceptada")
+                print(f"  Solicitud aceptada")
                 print(f"  La carga comenzará en unos momentos...")
                 print(f"  El conductor {driver_id} verá la carga en su aplicación")
             else:
-                print(f"  ❌ Solicitud rechazada: {response}")
+                print(f"  Solicitud rechazada: {response}")
     except Exception as e:
-        print(f"  ❌ Error al comunicarse con el Engine: {e}")
+        print(f"  Error al comunicarse con el Engine: {e}")
     
     time.sleep(2)
 
 
+# Muestra el estado detallado con actualización en tiempo real
 def show_detailed_status(engine_ip, engine_port):
-    """Muestra el estado detallado con actualización en tiempo real"""
     global CP_ID, CP_ADDRESS, CP_PRICE, CP_STATUS, CURRENT_DRIVER, CHARGING_INFO, PAUSED
     
     import select
@@ -358,8 +420,8 @@ def show_detailed_status(engine_ip, engine_port):
         print(f"  Dirección: {CP_ADDRESS}")
         print(f"  Precio: {CP_PRICE}€/kWh")
         
-        icon, status_text, color_text = get_status_display(CP_STATUS)
-        print(f"  Estado actual: {icon} {status_text} ({color_text})")
+        status_text, color_text = get_status_display(CP_STATUS)
+        print(f"  Estado actual: {status_text} ({color_text})")
         
         if CURRENT_DRIVER:
             print(f"\n  CARGA ACTIVA:")
@@ -390,25 +452,17 @@ def show_detailed_status(engine_ip, engine_port):
         print(f"  Presiona ENTER para volver al menú principal")
         print(f"{'='*70}\n")
         
-        if os.name == 'nt':
-            import msvcrt
-            if msvcrt.kbhit():
-                key = msvcrt.getch()
-                if key == b'\r':
-                    running = False
-        else:
-            import select
-            i, o, e = select.select([sys.stdin], [], [], 0)
-            if i:
-                line = sys.stdin.readline()
-                running = False
+        i, o, e = select.select([sys.stdin], [], [], 0)
+        if i:
+            line = sys.stdin.readline()
+            running = False
         
         if running:
             time.sleep(1)
 
 
+# Función principal
 def main(engine_ip, engine_port, central_ip, central_port, cp_id):
-    """Función principal"""
     global CP_ID, RUNNING
     CP_ID = cp_id
     
@@ -425,6 +479,14 @@ def main(engine_ip, engine_port, central_ip, central_port, cp_id):
     print(f"[Monitor] Autenticándose con Central...")
     central_conn = connect_central(central_ip, central_port, cp_id)
 
+    # Iniciar hilo para escuchar comandos de Central
+    threading.Thread(
+        target=listen_central_commands,
+        args=(central_conn, engine_ip, engine_port, cp_id),
+        daemon=True
+    ).start()
+
+    # Iniciar hilo para monitorizar el Engine
     threading.Thread(
         target=connect_engine, 
         args=(central_conn, engine_ip, engine_port, cp_id), 
@@ -441,11 +503,11 @@ def main(engine_ip, engine_port, central_ip, central_port, cp_id):
     
     RUNNING = False
     central_conn.close()
-    print(f"  ✅ Monitor {cp_id} finalizado correctamente.\n")
+    print(f"  Monitor {cp_id} finalizado correctamente.\n")
 
 
+# Leer argumentos de línea de comandos
 def args():
-    """Leer argumentos de línea de comandos"""
     return sys.argv[1], int(sys.argv[2]), sys.argv[3], int(sys.argv[4]), sys.argv[5]
 
 

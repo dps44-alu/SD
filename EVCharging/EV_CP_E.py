@@ -16,22 +16,24 @@ CHARGING_ACTIVE = False
 CONFIG_RECEIVED = False
 CURRENT_KWH = 0.0
 CURRENT_COST = 0.0
+STOP_CHARGE = False                 # Flag para detener carga en progreso
+MANUALLY_STOPPED = False            # Flag para indicar que fue detenido por comando de Central
+CHARGE_LOCK = threading.Lock()      # Lock para sincronizar operaciones de carga
 
 
-# ---------------------------
-# Engine CP
-# ---------------------------
 def args():
     return sys.argv[1], int(sys.argv[2])
 
 
 def simulate_failure():
-    global CP_STATUS
-    CP_STATUS = "OUT_OF_ORDER"
-    print("[Engine] Estado cambiado manualmente a OUT_OF_ORDER (durante 3s)")
-    time.sleep(3)
-    CP_STATUS = "ACTIVE"
-    print("\n[Engine] Estado restaurado automáticamente a ACTIVE")
+    global CP_STATUS, MANUALLY_STOPPED
+    # Solo permitir simulación de fallo si no está manualmente detenido
+    if not MANUALLY_STOPPED:
+        CP_STATUS = "OUT_OF_ORDER"
+        print("[Engine] Estado cambiado manualmente a OUT_OF_ORDER (durante 3s)")
+        time.sleep(3)
+        CP_STATUS = "ACTIVE"
+        print("\n[Engine] Estado restaurado automáticamente a ACTIVE")
 
 
 def listen_keyboard():
@@ -41,25 +43,46 @@ def listen_keyboard():
 
 
 def handle_charging(producer, driver_id, cp_id, duration):
-    global CHARGING_ACTIVE, CP_STATUS, CP_PRICE, CURRENT_DRIVER, CURRENT_KWH, CURRENT_COST
+    global CHARGING_ACTIVE, CP_STATUS, CP_PRICE, CURRENT_DRIVER, CURRENT_KWH, CURRENT_COST, STOP_CHARGE, MANUALLY_STOPPED
     
-    CHARGING_ACTIVE = True
-    CURRENT_DRIVER = driver_id
+    with CHARGE_LOCK:
+        CHARGING_ACTIVE = True
+        CURRENT_DRIVER = driver_id
+        STOP_CHARGE = False  # Resetear flag al inicio
+    
     total_kwh = 0
     total_cost = 0
     
     print(f"[Engine] Iniciando carga para {driver_id} durante {duration}s a {CP_PRICE}€/kWh")
     
-    # Cambiar estado a BUSY
-    CP_STATUS = "BUSY"
+    # Solo cambiar a BUSY si no está manualmente detenido
+    if not MANUALLY_STOPPED:
+        CP_STATUS = "BUSY"
+    
+    charge_interrupted = False
+    interruption_reason = ""
     
     for i in range(duration):
+        # Verificar condiciones de parada
+        with CHARGE_LOCK:
+            if STOP_CHARGE:
+                charge_interrupted = True
+                interruption_reason = "comando STOP de Central"
+                print(f"[Engine] Carga interrumpida por {interruption_reason}")
+                break
+        
         if not CHARGING_ACTIVE:
-            print(f"[Engine] Carga interrumpida externamente")
+            charge_interrupted = True
+            interruption_reason = "interrupción externa"
+            print(f"[Engine] Carga interrumpida por {interruption_reason}")
             break
             
-        if CP_STATUS == "OUT_OF_ORDER":
-            print(f"[Engine] Carga interrumpida por avería")
+        # CORRECCIÓN: Verificar tanto OUT_OF_ORDER como BROKEN
+        if CP_STATUS in ["OUT_OF_ORDER", "BROKEN"] and not MANUALLY_STOPPED:
+            # Solo si es por avería temporal, no por comando STOP
+            charge_interrupted = True
+            interruption_reason = "avería del CP"
+            print(f"[Engine] Carga interrumpida por {interruption_reason}")
             break
             
         time.sleep(1)
@@ -69,29 +92,42 @@ def handle_charging(producer, driver_id, cp_id, duration):
         CURRENT_KWH = total_kwh
         CURRENT_COST = total_cost
         
-        # Enviar actualización de consumo a Central (para el panel)
         consumption_msg = f"CONSUMPTION#{driver_id}#{cp_id}#{total_kwh:.2f}#{total_cost:.2f}"
         producer.send("consumo_cps", consumption_msg)
         producer.flush()
         print(f"[Engine] Consumo: {total_kwh:.2f} kWh, {total_cost:.2f}€")
     
-    CHARGING_ACTIVE = False
+    # Limpiar variables de carga
+    with CHARGE_LOCK:
+        CHARGING_ACTIVE = False
+        STOP_CHARGE = False
+    
     CURRENT_DRIVER = None
     CURRENT_KWH = 0.0
     CURRENT_COST = 0.0
     
-    # Volver a estado ACTIVE
-    CP_STATUS = "ACTIVE"
+    # Solo volver a ACTIVE si no fue detenido manualmente por comando STOP
+    if not MANUALLY_STOPPED and CP_STATUS not in ["OUT_OF_ORDER", "BROKEN"]:
+        CP_STATUS = "ACTIVE"
+    elif MANUALLY_STOPPED:
+        # CORRECCIÓN: Asegurar que permanece en BROKEN si fue detenido manualmente
+        CP_STATUS = "BROKEN"
+        print(f"[Engine] CP permanece en BROKEN por comando de Central")
     
-    # Notificar fin de carga
-    end_msg = f"CHARGE_END#{driver_id}#{cp_id}#{total_kwh:.2f}#{total_cost:.2f}"
+    # Enviar mensaje de finalización
+    if charge_interrupted:
+        end_msg = f"CHARGE_INTERRUPTED#{driver_id}#{cp_id}#{total_kwh:.2f}#{total_cost:.2f}#{interruption_reason}"
+        print(f"[Engine] Carga interrumpida. Consumo parcial: {total_kwh:.2f} kWh, {total_cost:.2f}€")
+    else:
+        end_msg = f"CHARGE_END#{driver_id}#{cp_id}#{total_kwh:.2f}#{total_cost:.2f}"
+        print(f"[Engine] Carga finalizada. Total: {total_kwh:.2f} kWh, {total_cost:.2f}€")
+    
     producer.send("consumo_cps", end_msg)
     producer.flush()
-    print(f"[Engine] Carga finalizada. Total: {total_kwh:.2f} kWh, {total_cost:.2f}€")
 
 
 def handle_monitor(conn, addr, producer):
-    global CP_ID, CP_PRICE, CP_ADDRESS, CP_STATUS, CONFIG_RECEIVED, CURRENT_DRIVER, CURRENT_KWH, CURRENT_COST
+    global CP_ID, CP_PRICE, CP_ADDRESS, CP_STATUS, CONFIG_RECEIVED, CURRENT_DRIVER, CURRENT_KWH, CURRENT_COST, STOP_CHARGE, CHARGING_ACTIVE, MANUALLY_STOPPED
     last_status = ""
 
     while True:
@@ -105,7 +141,6 @@ def handle_monitor(conn, addr, producer):
             msg_type = parts[0]
 
             if msg_type == "STATUS":
-                # Enviar estado extendido: STATUS#driver_id#kwh#cost
                 driver_str = CURRENT_DRIVER if CURRENT_DRIVER else "None"
                 status_response = f"{CP_STATUS}#{driver_str}#{CURRENT_KWH:.2f}#{CURRENT_COST:.2f}"
                 
@@ -135,32 +170,67 @@ def handle_monitor(conn, addr, producer):
                 conn.sendall(b"CONFIG_OK")
                 
             elif msg_type == "MANUAL_CHARGE":
-                # Formato: MANUAL_CHARGE#cp_id#driver_id#duration
                 cp_id = parts[1]
                 driver_id = parts[2]
                 duration = int(parts[3])
                 
-                if cp_id == CP_ID and CP_STATUS == "ACTIVE" and not CHARGING_ACTIVE:
+                # Verificar que no está manualmente detenido
+                if cp_id == CP_ID and CP_STATUS == "ACTIVE" and not CHARGING_ACTIVE and not MANUALLY_STOPPED:
                     print(f"[Engine] Carga manual aceptada:")
                     print(f"         Conductor: {driver_id}")
                     print(f"         Duración: {duration}s")
                     conn.sendall(b"CHARGE_ACCEPTED")
                     
-                    # Notificar al conductor que se aceptó la carga
                     accept_msg = f"ACCEPTED#{driver_id}#{cp_id}"
                     producer.send("respuestas_central", accept_msg)
                     producer.flush()
                     
-                    # Iniciar carga con el driver_id proporcionado
                     threading.Thread(
                         target=handle_charging,
                         args=(producer, driver_id, cp_id, duration),
                         daemon=True
                     ).start()
                 else:
-                    reason = "CP ocupado o no disponible"
+                    if MANUALLY_STOPPED:
+                        reason = "CP detenido por comando de Central (BROKEN)"
+                    else:
+                        reason = "CP ocupado o no disponible"
                     print(f"[Engine] Carga manual rechazada: {reason}")
                     conn.sendall(reason.encode())
+            
+            elif msg_type == "STOP":
+                print(f"[Engine] Comando STOP recibido de Central")
+                
+                # Activar flag de parada manual
+                MANUALLY_STOPPED = True
+                
+                # Si hay carga en progreso, activar flag para detenerla
+                with CHARGE_LOCK:
+                    if CHARGING_ACTIVE:
+                        print(f"[Engine] Deteniendo carga en progreso para {CURRENT_DRIVER}...")
+                        STOP_CHARGE = True
+                
+                # CORRECCIÓN: Cambiar estado a BROKEN (no OUT_OF_ORDER)
+                CP_STATUS = "BROKEN"
+                print(f"[Engine] Estado cambiado a BROKEN (Averiado)")
+                print(f"[Engine] CP detenido manualmente - no aceptará nuevas cargas hasta RESUME")
+                conn.sendall(b"STOP_OK")
+            
+            elif msg_type == "RESUME":
+                print(f"[Engine] Comando RESUME recibido de Central")
+                
+                # Desactivar flag de parada manual
+                MANUALLY_STOPPED = False
+                
+                # Limpiar flag de detención de carga
+                with CHARGE_LOCK:
+                    STOP_CHARGE = False
+                
+                # Cambiar estado a ACTIVE
+                CP_STATUS = "ACTIVE"
+                print(f"[Engine] Estado cambiado a ACTIVE")
+                print(f"[Engine] CP reanudado - listo para aceptar cargas")
+                conn.sendall(b"RESUME_OK")
                 
         except Exception as e:
             print(f"[Engine] Error: {e}")
@@ -195,20 +265,22 @@ def listen_charge_requests(producer, broker_ip, broker_port):
             cp_id = parts[2]
             duration = int(parts[3])
             
-            if cp_id == CP_ID and CP_STATUS == "ACTIVE" and not CHARGING_ACTIVE:
-                # Confirmar inicio de carga
+            # Verificar que no está manualmente detenido
+            if cp_id == CP_ID and CP_STATUS == "ACTIVE" and not CHARGING_ACTIVE and not MANUALLY_STOPPED:
                 confirm_msg = f"CHARGE_STARTED#{driver_id}#{cp_id}"
                 producer.send("respuestas_engine", confirm_msg)
                 producer.flush()
                 
-                # Iniciar proceso de carga
                 threading.Thread(
                     target=handle_charging,
                     args=(producer, driver_id, cp_id, duration),
                     daemon=True
                 ).start()
             else:
-                print(f"[Engine] Petición rechazada: CP no disponible o ya en uso")
+                if MANUALLY_STOPPED:
+                    print(f"[Engine] Petición rechazada: CP detenido manualmente por Central (BROKEN)")
+                else:
+                    print(f"[Engine] Petición rechazada: CP no disponible o ya en uso")
 
 
 def main(broker_ip, broker_port):
