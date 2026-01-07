@@ -5,6 +5,12 @@ import threading
 import os
 import select
 
+import requests
+import urllib3
+
+
+urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+
 
 CP_STATUS = None
 CP_ADDRESS = None
@@ -74,6 +80,7 @@ def display_monitor_screen():
             print(f"  CONTROLES:")
             print(f"  - Presiona '1' + ENTER para solicitar carga manual")
             print(f"  - Presiona '2' + ENTER para ver estado detallado")
+            print(f"  - Presiona '3' + ENTER para re-registrar en Registry") 
             print(f"  - Presiona '0' + ENTER para salir")
             print(f"{'='*70}")
             print(f"\n  Actualización automática cada 1 segundo...")
@@ -301,6 +308,39 @@ def connect_engine(central_conn, engine_ip, engine_port, cp_id):
                 break
 
 
+def register_cp_manually():
+    """Permite re-registrar el CP manualmente"""
+    global CP_ID, CP_ADDRESS, CP_PRICE
+    
+    clear_screen()
+    print(f"\n{'─'*70}")
+    print(f"  RE-REGISTRO EN REGISTRY")
+    print(f"{'─'*70}")
+    print(f"  CP ID: {CP_ID}")
+    print(f"  Dirección: {CP_ADDRESS}")
+    print(f"  Precio: {CP_PRICE}€/kWh")
+    print(f"{'─'*70}")
+    
+    confirm = input("\n  ¿Deseas re-registrar este CP? (s/n): ").strip().lower()
+    
+    if confirm == 's':
+        registry_url = "https://localhost:5001"
+        success, username, password = register_with_registry(
+            registry_url, CP_ID, CP_ADDRESS, CP_PRICE
+        )
+        
+        if success:
+            print("\n  ✓ CP registrado correctamente")
+            if username:
+                print(f"  Credenciales recibidas: {username}")
+        else:
+            print("\n  ✗ Error en el registro")
+    else:
+        print("  Operación cancelada")
+    
+    input("\n  Presiona ENTER para continuar...")
+
+
 # Maneja la entrada del usuario de forma no bloqueante
 def handle_user_input(engine_ip, engine_port):
     global RUNNING, CP_ID, PAUSED
@@ -316,6 +356,10 @@ def handle_user_input(engine_ip, engine_port):
             elif user_input.strip() == "2":
                 PAUSED = True
                 show_detailed_status(engine_ip, engine_port)
+                PAUSED = False
+            elif user_input.strip() == "3":  
+                PAUSED = True
+                register_cp_manually()
                 PAUSED = False
             elif user_input.strip() == "0":
                 print(f"\n[Monitor] Cerrando Monitor...")
@@ -461,15 +505,76 @@ def show_detailed_status(engine_ip, engine_port):
             time.sleep(1)
 
 
+def register_with_registry(registry_url, cp_id, address, price):
+    """
+    Registra el CP en EV_Registry vía API REST
+    Retorna (success, username, password)
+    """
+    try:
+        print(f"[Monitor] Registrando CP {cp_id} en Registry...")
+        
+        response = requests.post(
+            f"{registry_url}/register",
+            json={
+                "id": cp_id,
+                "address": address,
+                "price": price
+            },
+            verify=False,  # Ignorar certificado SSL autofirmado
+            timeout=5
+        )
+        
+        if response.status_code == 201:
+            data = response.json()
+            print(f"[Monitor] CP registrado exitosamente")
+            print(f"          Username: {data['username']}")
+            print(f"          Password: {data['password']}")
+            return True, data['username'], data['password']
+        elif response.status_code == 409:
+            print(f"[Monitor] CP ya estaba registrado")
+            return True, None, None
+        else:
+            print(f"[Monitor] Error en registro: {response.json()}")
+            return False, None, None
+            
+    except Exception as e:
+        print(f"[Monitor] Error conectando con Registry: {e}")
+        return False, None, None
+    
+
 # Función principal
 def main(engine_ip, engine_port, central_ip, central_port, cp_id):
     global CP_ID, RUNNING
     CP_ID = cp_id
     
+    # AÑADIR: Intentar registro en Registry primero
+    registry_url = "https://localhost:5001"  # URL del Registry
+    print(f"[Monitor] Intentando registro en Registry...")
+    
+    # Obtener config de Central primero para tener address y price
     print(f"[Monitor] Solicitando configuración a Central para CP: {cp_id}")
     if not get_config_from_central(central_ip, central_port, cp_id):
-        print("[Monitor] Error crítico: no se pudo obtener la configuración de Central")
-        return
+        # Si no existe en Central, solicitar datos para registro
+        print(f"\n[Monitor] CP no encontrado en sistema. Iniciando proceso de registro...")
+        CP_ADDRESS = input("  Dirección del CP: ").strip()
+        CP_PRICE = float(input("  Precio (€/kWh): ").strip())
+        
+        # Registrar en Registry
+        success, username, password = register_with_registry(
+            registry_url, cp_id, CP_ADDRESS, CP_PRICE
+        )
+        
+        if not success:
+            print("[Monitor] Error crítico: no se pudo registrar en Registry")
+            return
+        
+        print(f"[Monitor] Esperando 2 segundos para que Registry actualice la BD...")
+        time.sleep(2)
+        
+        # Reintentar obtener config
+        if not get_config_from_central(central_ip, central_port, cp_id):
+            print("[Monitor] Error: aún no se puede obtener configuración")
+            return
     
     print(f"[Monitor] Enviando configuración al Engine...")
     if not send_config_to_engine(engine_ip, engine_port, cp_id):
