@@ -547,7 +547,7 @@ def main(engine_ip, engine_port, central_ip, central_port, cp_id):
     global CP_ID, RUNNING
     CP_ID = cp_id
     
-    # AÑADIR: Intentar registro en Registry primero
+    # Intentar registro en Registry primero
     registry_url = "https://localhost:5001"  # URL del Registry
     print(f"[Monitor] Intentando registro en Registry...")
     

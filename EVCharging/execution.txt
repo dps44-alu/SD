@@ -17,3 +17,7 @@ BROKER_IP --- BROKER_PORT --- Driver_ID
 python3 EV_Driver.py localhost 9092 Driver1
 
 python3 EV_Registry.py
+
+python3 EV_W.py
+
+xdg-open front.html

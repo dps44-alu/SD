@@ -102,6 +102,7 @@ def register_cp():
         "password": password
     }), 201
 
+
 # DELETE /register/<cp_id> - Dar de baja un CP
 @app.route('/register/<cp_id>', methods=['DELETE'])
 def unregister_cp(cp_id):
@@ -123,6 +124,7 @@ def unregister_cp(cp_id):
     
     return jsonify({"status": "SUCCESS"}), 200
 
+
 # GET /register/<cp_id> - Consultar si un CP estÃ¡ registrado
 @app.route('/register/<cp_id>', methods=['GET'])
 def check_cp(cp_id):
@@ -139,10 +141,10 @@ def check_cp(cp_id):
     
     return jsonify({"status": "NOT_FOUND"}), 404
 
+
+# Usar HTTPS simple con certificado autofirmado
+# Generar certificado: openssl req -x509 -newkey rsa:4096 -nodes -out cert.pem -keyout key.pem -days 365
 if __name__ == "__main__":
-    # Usar HTTPS simple con certificado autofirmado
-    # Generar certificado: openssl req -x509 -newkey rsa:4096 -nodes -out cert.pem -keyout key.pem -days 365
-    
     if not os.path.exists("cert.pem") or not os.path.exists("key.pem"):
         print("[Registry] ADVERTENCIA: Ejecutar para generar certificados SSL:")
         print("openssl req -x509 -newkey rsa:4096 -nodes -out cert.pem -keyout key.pem -days 365")
