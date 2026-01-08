@@ -337,6 +337,7 @@ class DriverTerminal:
                 self.charging = False
                 self.current_cp = None
     
+    
     # Actualizar lista de CPs disponibles desde BD
     def update_cp_list(self):
         import json

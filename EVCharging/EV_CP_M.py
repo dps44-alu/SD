@@ -229,10 +229,12 @@ def listen_central_commands(central_conn, engine_ip, engine_port, cp_id):
                             # Confirmar a Central
                             central_conn.sendall(response.encode())
                             
-                            # CORRECCIÓN: Actualizar estado según comando
+                            # Actualizar estado según comando
                             if command == "STOP":
-                                CP_STATUS = "BROKEN"  # Cambiar a BROKEN en lugar de OUT_OF_ORDER
+                                # Cambiar a BROKEN en lugar de OUT_OF_ORDER
+                                CP_STATUS = "BROKEN"                                    
                                 print(f"[Monitor] CP {cp_id} detenido - estado: BROKEN (Averiado)")
+
                             elif command == "RESUME":
                                 CP_STATUS = "ACTIVE"
                                 print(f"[Monitor] CP {cp_id} reanudado - estado: ACTIVE")
@@ -308,8 +310,8 @@ def connect_engine(central_conn, engine_ip, engine_port, cp_id):
                 break
 
 
+# Permite re-registrar el CP manualmente
 def register_cp_manually():
-    """Permite re-registrar el CP manualmente"""
     global CP_ID, CP_ADDRESS, CP_PRICE
     
     clear_screen()
@@ -330,11 +332,11 @@ def register_cp_manually():
         )
         
         if success:
-            print("\n  ✓ CP registrado correctamente")
+            print("\n  CP registrado correctamente")
             if username:
                 print(f"  Credenciales recibidas: {username}")
         else:
-            print("\n  ✗ Error en el registro")
+            print("\n  Error en el registro")
     else:
         print("  Operación cancelada")
     
@@ -505,23 +507,21 @@ def show_detailed_status(engine_ip, engine_port):
             time.sleep(1)
 
 
+# Registra el CP en EV_Registry vía API REST
+# Retorna (success, username, password)
 def register_with_registry(registry_url, cp_id, address, price):
-    """
-    Registra el CP en EV_Registry vía API REST
-    Retorna (success, username, password)
-    """
     try:
         print(f"[Monitor] Registrando CP {cp_id} en Registry...")
         
         response = requests.post(
             f"{registry_url}/register",
-            json={
+            json = {
                 "id": cp_id,
                 "address": address,
                 "price": price
             },
-            verify=False,  # Ignorar certificado SSL autofirmado
-            timeout=5
+            verify = False,         # Ignorar certificado SSL autofirmado
+            timeout = 5
         )
         
         if response.status_code == 201:
@@ -530,9 +530,11 @@ def register_with_registry(registry_url, cp_id, address, price):
             print(f"          Username: {data['username']}")
             print(f"          Password: {data['password']}")
             return True, data['username'], data['password']
+        
         elif response.status_code == 409:
             print(f"[Monitor] CP ya estaba registrado")
             return True, None, None
+        
         else:
             print(f"[Monitor] Error en registro: {response.json()}")
             return False, None, None
@@ -547,8 +549,8 @@ def main(engine_ip, engine_port, central_ip, central_port, cp_id):
     global CP_ID, RUNNING
     CP_ID = cp_id
     
-    # AÑADIR: Intentar registro en Registry primero
-    registry_url = "https://localhost:5001"  # URL del Registry
+    # Intentar registro en Registry primero
+    registry_url = "https://localhost:5001"                     # URL del Registry
     print(f"[Monitor] Intentando registro en Registry...")
     
     # Obtener config de Central primero para tener address y price

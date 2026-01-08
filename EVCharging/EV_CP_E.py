@@ -48,7 +48,7 @@ def handle_charging(producer, driver_id, cp_id, duration):
     with CHARGE_LOCK:
         CHARGING_ACTIVE = True
         CURRENT_DRIVER = driver_id
-        STOP_CHARGE = False  # Resetear flag al inicio
+        STOP_CHARGE = False             # Resetear flag al inicio
     
     total_kwh = 0
     total_cost = 0
@@ -77,7 +77,7 @@ def handle_charging(producer, driver_id, cp_id, duration):
             print(f"[Engine] Carga interrumpida por {interruption_reason}")
             break
             
-        # CORRECCIÓN: Verificar tanto OUT_OF_ORDER como BROKEN
+        # Verificar tanto OUT_OF_ORDER como BROKEN
         if CP_STATUS in ["OUT_OF_ORDER", "BROKEN"] and not MANUALLY_STOPPED:
             # Solo si es por avería temporal, no por comando STOP
             charge_interrupted = True
@@ -110,7 +110,7 @@ def handle_charging(producer, driver_id, cp_id, duration):
     if not MANUALLY_STOPPED and CP_STATUS not in ["OUT_OF_ORDER", "BROKEN"]:
         CP_STATUS = "ACTIVE"
     elif MANUALLY_STOPPED:
-        # CORRECCIÓN: Asegurar que permanece en BROKEN si fue detenido manualmente
+        # Asegurar que permanece en BROKEN si fue detenido manualmente
         CP_STATUS = "BROKEN"
         print(f"[Engine] CP permanece en BROKEN por comando de Central")
     
@@ -193,6 +193,7 @@ def handle_monitor(conn, addr, producer):
                 else:
                     if MANUALLY_STOPPED:
                         reason = "CP detenido por comando de Central (BROKEN)"
+
                     else:
                         reason = "CP ocupado o no disponible"
                     print(f"[Engine] Carga manual rechazada: {reason}")
@@ -210,7 +211,7 @@ def handle_monitor(conn, addr, producer):
                         print(f"[Engine] Deteniendo carga en progreso para {CURRENT_DRIVER}...")
                         STOP_CHARGE = True
                 
-                # CORRECCIÓN: Cambiar estado a BROKEN (no OUT_OF_ORDER)
+                # Verificar que permanece en BROKEN si fue detenido manualmente
                 CP_STATUS = "BROKEN"
                 print(f"[Engine] Estado cambiado a BROKEN (Averiado)")
                 print(f"[Engine] CP detenido manualmente - no aceptará nuevas cargas hasta RESUME")
@@ -276,6 +277,7 @@ def listen_charge_requests(producer, broker_ip, broker_port):
                     args=(producer, driver_id, cp_id, duration),
                     daemon=True
                 ).start()
+                
             else:
                 if MANUALLY_STOPPED:
                     print(f"[Engine] Petición rechazada: CP detenido manualmente por Central (BROKEN)")

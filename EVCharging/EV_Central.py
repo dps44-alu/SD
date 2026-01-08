@@ -8,6 +8,13 @@ from kafka import KafkaProducer, KafkaConsumer
 import os
 import signal
 
+from flask import Flask, request, jsonify
+from flask_cors import CORS
+
+
+app = Flask(__name__)
+CORS(app)                               # Permitir peticiones desde el navegador
+
 
 CENTRAL_IP = "localhost"
 DB_FILE = "db.json"
@@ -29,8 +36,8 @@ MENU_REFRESH_EVENT = threading.Event()  # Evento para controlar refresco del men
 def log_message(message):
     with MESSAGE_LOCK:
         MESSAGE_BUFFER.append(f"[{time.strftime('%H:%M:%S')}] {message}")
-    # Señalar que hay mensajes nuevos
-    MENU_REFRESH_EVENT.set()
+
+    MENU_REFRESH_EVENT.set()    # Señalar que hay mensajes nuevos
 
 
 # Limpiar pantalla de forma multiplataforma
@@ -45,11 +52,14 @@ def display_pending_messages():
             print("\n" + "="*60)
             print("  MENSAJES DEL SISTEMA")
             print("="*60)
+
             for msg in MESSAGE_BUFFER:
                 print(f"  {msg}")
+
             print("="*60)
             MESSAGE_BUFFER.clear()
             return True
+        
     return False
 
 
@@ -61,11 +71,15 @@ def load_db():
         try:
             with open(DB_FILE, "r") as f:
                 content = f.read()
+
                 if not content.strip():
                     return {"charging_points": [], "drivers": []}
+                
                 return json.loads(content)
+            
         except FileNotFoundError:
             return {"charging_points": [], "drivers": []}
+        
         except json.JSONDecodeError:
             log_message("Central: Error leyendo BD, retornando BD vacía")
             return {"charging_points": [], "drivers": []}
@@ -94,6 +108,7 @@ def get_charging_point(cp_id):
     for cp in db["charging_points"]:
         if cp["id"] == cp_id:
             return cp
+        
     return None
 
 
@@ -137,7 +152,7 @@ def send_command_to_cp(cp_id, command):
         try:
             # Guardar el timeout original
             original_timeout = conn.gettimeout()
-            conn.settimeout(5)  # Timeout de 5 segundos
+            conn.settimeout(5)                      # Timeout de 5 segundos
             
             response = conn.recv(1024).decode()
             log_message(f"Central: Respuesta de {cp_id}: {response}")
@@ -159,10 +174,13 @@ def send_command_to_cp(cp_id, command):
                     # Cambiar a BROKEN (rojo) y mantener info de carga
                     update_charging_point(cp_id, "BROKEN", current_driver, current_kwh, current_cost)
                     log_message(f"Central: BD actualizada - {cp_id} → BROKEN (Averiado)")
+
                 elif command == "RESUME":
                     update_charging_point(cp_id, "ACTIVE", "")
                     log_message(f"Central: BD actualizada - {cp_id} → ACTIVE")
+
                 return True
+            
             else:
                 log_message(f"Central: Comando no confirmado por {cp_id}")
                 return False
@@ -195,6 +213,7 @@ def stop_all_charging_points():
     for cp in cps:
         if stop_charging_point(cp["id"]):
             stopped_count += 1
+
     log_message(f"Central: {stopped_count}/{len(cps)} CPs detenidos")
     return stopped_count
 
@@ -206,6 +225,7 @@ def resume_all_charging_points():
     for cp in cps:
         if resume_charging_point(cp["id"]):
             resumed_count += 1
+
     log_message(f"Central: {resumed_count}/{len(cps)} CPs reanudados")
     return resumed_count
 
@@ -586,6 +606,7 @@ def cp_authentication(conn, cp_id, cp_address, cp_price, cp_status):
     for cp in list_charging_points():
         if cp["id"] == cp_id:
             return True
+        
     return False
 
 
@@ -689,6 +710,7 @@ def handle_monitor_connection(conn, addr):
                     
     except Exception as e:
         log_message(f"Central: Error con Monitor: {e}")
+
     finally:
         if cp_id:
             with CONNECTIONS_LOCK:
@@ -714,8 +736,10 @@ def main(central_port):
                     args=(conn, addr),
                     daemon=True
                 ).start()
+
             except socket.timeout:
                 continue
+
             except Exception as e:
                 if not SHUTDOWN_FLAG:
                     log_message(f"Central: Error aceptando conexión: {e}")
@@ -726,6 +750,203 @@ def signal_handler(sig, frame):
     global SHUTDOWN_FLAG
     print("\n[Central] Señal de interrupción recibida. Cerrando sistema...")
     SHUTDOWN_FLAG = True
+
+
+# Endpoint para recibir alertas de EV_W -> {"cp_id": "ALC1", "alert_type": "ALERT|CANCEL", "reason": "..."}
+@app.route('/weather/alert', methods=['POST'])
+def weather_alert():
+    try:
+        data = request.json
+        cp_id = data.get("cp_id")
+        alert_type = data.get("alert_type")
+        reason = data.get("reason", "")
+        
+        if not cp_id or not alert_type:
+            return jsonify({"status": "ERROR", "message": "Faltan datos"}), 400
+        
+        cp = get_charging_point(cp_id)
+        if not cp:
+            return jsonify({"status": "ERROR", "message": "CP no encontrado"}), 404
+        
+        if alert_type == "ALERT":
+            # Temperatura crítica - detener CP
+            log_message(f"Central: Alerta climática en {cp_id} - {reason}")
+            
+            # Si está cargando, permitir que termine
+            if cp["status"] == "BUSY":
+                log_message(f"Central: {cp_id} terminará carga actual antes de detenerse")
+
+            else:
+                # Detener inmediatamente
+                if stop_charging_point(cp_id):
+                    log_message(f"Central: {cp_id} detenido por alerta climática")
+                    return jsonify({"status": "SUCCESS", "action": "CP_STOPPED"}), 200
+                else:
+                    return jsonify({"status": "ERROR", "message": "No se pudo detener CP"}), 500
+                    
+        elif alert_type == "CANCEL":
+            # Temperatura normalizada - reanudar CP
+            log_message(f"Central: Alerta cancelada en {cp_id} - {reason}")
+            
+            if resume_charging_point(cp_id):
+                log_message(f"Central: {cp_id} reanudado tras normalización")
+                return jsonify({"status": "SUCCESS", "action": "CP_RESUMED"}), 200
+            else:
+                return jsonify({"status": "ERROR", "message": "No se pudo reanudar CP"}), 500
+        
+        return jsonify({"status": "SUCCESS"}), 200
+        
+    except Exception as e:
+        log_message(f"Central: Error procesando alerta climática: {e}")
+        return jsonify({"status": "ERROR", "message": str(e)}), 500
+    
+
+# GET /api/charging_points
+# Devuelve todos los puntos de carga con su estado actual
+@app.route('/api/charging_points', methods=['GET'])
+def get_all_charging_points():
+    try:
+        cps = list_charging_points()
+        
+        # Añadir info de conexión
+        with CONNECTIONS_LOCK:
+            for cp in cps:
+                cp['connected'] = cp['id'] in ACTIVE_CONNECTIONS
+        
+        return jsonify({
+            "status": "SUCCESS",
+            "data": cps,
+            "count": len(cps)
+        }), 200
+        
+    except Exception as e:
+        log_message(f"Central API: Error obteniendo CPs: {e}")
+        return jsonify({"status": "ERROR", "message": str(e)}), 500
+
+
+# GET /api/charging_points/<cp_id>
+# Devuelve detalle de un CP específico
+@app.route('/api/charging_points/<cp_id>', methods=['GET'])
+def get_charging_point_detail(cp_id):
+    try:
+        cp = get_charging_point(cp_id)
+        
+        if not cp:
+            return jsonify({"status": "ERROR", "message": "CP no encontrado"}), 404
+        
+        # Añadir info de conexión
+        with CONNECTIONS_LOCK:
+            cp['connected'] = cp_id in ACTIVE_CONNECTIONS
+        
+        return jsonify({
+            "status": "SUCCESS",
+            "data": cp
+        }), 200
+        
+    except Exception as e:
+        log_message(f"Central API: Error obteniendo CP {cp_id}: {e}")
+        return jsonify({"status": "ERROR", "message": str(e)}), 500
+
+
+# GET /api/drivers
+# Devuelve todos los conductores registrados
+@app.route('/api/drivers', methods=['GET'])
+def get_all_drivers():
+    try:
+        db = load_db()
+        drivers = db.get("drivers", [])
+        
+        return jsonify({
+            "status": "SUCCESS",
+            "data": drivers,
+            "count": len(drivers)
+        }), 200
+        
+    except Exception as e:
+        log_message(f"Central API: Error obteniendo drivers: {e}")
+        return jsonify({"status": "ERROR", "message": str(e)}), 500
+
+
+# GET /api/system/status
+# Devuelve estado general del sistema
+@app.route('/api/system/status', methods=['GET'])
+def get_system_status():
+    try:
+        cps = list_charging_points()
+        db = load_db()
+        
+        # Contar estados
+        status_count = {
+            "ACTIVE": 0,
+            "BUSY": 0,
+            "OUT_OF_ORDER": 0,
+            "BROKEN": 0,
+            "INACTIVE": 0
+        }
+        
+        for cp in cps:
+            status = cp.get("status", "INACTIVE")
+            status_count[status] = status_count.get(status, 0) + 1
+        
+        with CONNECTIONS_LOCK:
+            connected_cps = len(ACTIVE_CONNECTIONS)
+        
+        return jsonify({
+            "status": "SUCCESS",
+            "data": {
+                "total_cps": len(cps),
+                "connected_cps": connected_cps,
+                "status_breakdown": status_count,
+                "total_drivers": len(db.get("drivers", [])),
+                "timestamp": time.strftime("%Y-%m-%d %H:%M:%S")
+            }
+        }), 200
+        
+    except Exception as e:
+        log_message(f"Central API: Error obteniendo estado del sistema: {e}")
+        return jsonify({"status": "ERROR", "message": str(e)}), 500
+
+
+# GET /api/messages
+# Devuelve los mensajes del sistema (últimos 50)
+@app.route('/api/messages', methods=['GET'])
+def get_system_messages():
+    try:
+        with MESSAGE_LOCK:
+            # Devolver copia de los últimos 50 mensajes
+            recent_messages = MESSAGE_BUFFER[-50:] if len(MESSAGE_BUFFER) > 50 else MESSAGE_BUFFER.copy()
+        
+        return jsonify({
+            "status": "SUCCESS",
+            "data": recent_messages,
+            "count": len(recent_messages)
+        }), 200
+        
+    except Exception as e:
+        return jsonify({"status": "ERROR", "message": str(e)}), 500
+
+
+# GET /api/health
+# Verifica que el API está funcionando
+@app.route('/api/health', methods=['GET'])
+def health_check():
+    return jsonify({
+        "status": "SUCCESS",
+        "message": "API Central funcionando correctamente",
+        "timestamp": time.strftime("%Y-%m-%d %H:%M:%S")
+    }), 200
+
+
+# Ejecuta el servidor Flask para el API REST
+def run_api_server(port=8000):
+    import logging
+    
+    # Desactivar logs de Flask/Werkzeug
+    log = logging.getLogger('werkzeug')
+    log.setLevel(logging.ERROR)             # Solo mostrar errores críticos
+    
+    log_message(f"Central: API REST iniciada en puerto {port}")
+    app.run(host='0.0.0.0', port=port, debug=False, use_reloader=False)
 
 
 if __name__ == "__main__":
@@ -743,6 +964,8 @@ if __name__ == "__main__":
     threading.Thread(target=listen_cp_consumption, args=(broker_ip, broker_port), daemon=True).start()
     
     threading.Thread(target=main, args=(central_port,), daemon=True).start()
+
+    threading.Thread(target=run_api_server, args=(8000,), daemon=True).start()
     
     time.sleep(2)
     
