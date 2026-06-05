@@ -1,23 +1,93 @@
-docker compose up -d 
+============================================================
+  EVCharging Network - Guía de ejecución
+============================================================
 
+REQUISITOS PREVIOS
+------------------
+# Instalar dependencias Python
+pip3 install flask flask-cors kafka-python requests cryptography --break-system-packages
+
+# Generar certificados SSL para EV_Registry (solo la primera vez)
+openssl req -x509 -newkey rsa:4096 -nodes -out cert.pem -keyout key.pem -days 365 -subj "/CN=localhost"
+
+# Limpiar datos anteriores (opcional, para empezar desde cero)
+rm -f db.json credentials.json audit.log creds_*.json
+
+
+============================================================
+  ORDEN DE ARRANQUE (abrir una terminal por componente)
+============================================================
+
+1. KAFKA (broker de mensajería)
+   docker compose up -d
+   # Verificar que está corriendo:
+   docker ps
+
+2. EV_Registry (registro de CPs, HTTPS en puerto 5001)
+   python3 EV_Registry.py
+
+3. EV_Central (central de control, puerto 5000 + API REST puerto 8000)
+   python3 EV_Central.py
+   # Con parámetros: python3 EV_Central.py <CENTRAL_PORT> <BROKER_IP> <BROKER_PORT>
+   # Valores por defecto: 5000 localhost 9092
+
+4. EV_CP_E / Engine (motor del punto de carga, puerto 6000)
+   python3 EV_CP_E.py
+   # Con parámetros: python3 EV_CP_E.py <BROKER_IP> <BROKER_PORT>
+   # Valores por defecto: localhost 9092
+   # Pulsa ENTER en cualquier momento para simular fallo temporal (3s)
+
+5. EV_CP_M / Monitor (monitor del punto de carga)
+   python3 EV_CP_M.py
+   # Con parámetros: python3 EV_CP_M.py <ENGINE_IP> <ENGINE_PORT> <CENTRAL_IP> <CENTRAL_PORT> <CP_ID>
+   # Valores por defecto: localhost 6000 localhost 5000 ALC1
+   # Al arrancar: se registra en Registry, obtiene config de Central y clave de cifrado
+
+6. EV_Driver (aplicación del conductor)
+   python3 EV_Driver.py
+   # Con parámetros: python3 EV_Driver.py <BROKER_IP> <BROKER_PORT> <DRIVER_ID>
+   # Valores por defecto: localhost 9092 Driver1
+   # Opciones: solicitar carga manual o cargar lista desde archivo
+
+7. EV_W / Weather (oficina de control climático) [Release 2]
+   python3 EV_W.py
+   # Sin parámetros. Carga localizaciones de locations.txt si existe
+   # Formato locations.txt: CP_ID,Ciudad  (una por línea, ej: ALC1,Alicante)
+
+8. FRONT (panel web) [Release 2]
+   xdg-open front.html
+   # Requiere EV_Central corriendo. Accede a http://localhost:8000/api
+
+
+============================================================
+  FORMATO DEL ARCHIVO DE CARGAS (EV_Driver opción 3)
+============================================================
+# Crear un archivo .txt con un CP_ID por línea:
+ALC1
+ALC1
+MAD1
+
+
+============================================================
+  PARADA DEL SISTEMA
+============================================================
+# Parar Kafka:
 docker compose down
 
-docker ps
+# Parar el resto de componentes con Ctrl+C en cada terminal
 
-CENTRAL_PORT --- BROKER_IP --- BROKER_PORT
-python3 EV_Central.py 5000 localhost 9092
 
-BROKER_IP --- BROKER_PORT
-python3 EV_CP_E.py localhost 9092
-
-ENGINE_IP --- ENGINE_PORT --- CENTRAL_IP --- CENTRAL_PORT --- CP_ID
-python3 EV_CP_M.py localhost 6000 localhost 5000 ALC1
-
-BROKER_IP --- BROKER_PORT --- Driver_ID
-python3 EV_Driver.py localhost 9092 Driver1
-
-python3 EV_Registry.py
-
-python3 EV_W.py
-
-xdg-open front.html
+============================================================
+  NOTAS
+============================================================
+- EV_Registry y EV_Central comparten db.json como base de datos
+- Las credenciales de cada CP se guardan en credentials.json (Registry)
+  y en creds_<CP_ID>.json (Monitor, localmente)
+- El log de auditoría se guarda en audit.log (generado por Central)
+- Si un CP pierde sus credenciales locales, el Monitor las regenera
+  automáticamente borrando y re-registrando en Registry
+- Para despliegue distribuido (3 PCs):
+    PC1: Kafka + EV_Central + Front
+    PC2: EV_CP_E + EV_CP_M + EV_W
+    PC3: EV_Driver + EV_Registry
+  Sustituir 'localhost' por la IP real de cada máquina

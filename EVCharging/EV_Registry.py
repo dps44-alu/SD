@@ -8,8 +8,22 @@ import os
 app = Flask(__name__)
 
 
-REGISTRY_DB = "db.json" 
+REGISTRY_DB = "db.json"
+CREDENTIALS_FILE = "credentials.json"
 DB_LOCK = threading.Lock()
+
+
+def load_credentials():
+    try:
+        with open(CREDENTIALS_FILE, "r") as f:
+            return json.load(f)
+    except FileNotFoundError:
+        return {}
+
+
+def save_credentials(creds):
+    with open(CREDENTIALS_FILE, "w") as f:
+        json.dump(creds, f, indent=4)
 
 
 def load_registry():
@@ -17,47 +31,44 @@ def load_registry():
         try:
             with open(REGISTRY_DB, "r") as f:
                 data = json.load(f)
-                # Adaptar estructura de db.json
-                return {
-                    "registered_cps": [
-                        {
-                            "id": cp["id"],
-                            "address": cp["address"],
-                            "price": cp["price"],
-                            "username": f"cp_{cp['id']}",
-                            "password": "placeholder"                   # Se generará en registro
-                        }
-                        for cp in data.get("charging_points", [])
-                    ]
-                }
+            creds = load_credentials()
+            return {
+                "registered_cps": [
+                    {
+                        "id": cp["id"],
+                        "address": cp["address"],
+                        "price": cp["price"],
+                        "username": creds.get(cp["id"], {}).get("username", f"cp_{cp['id']}"),
+                        "password": creds.get(cp["id"], {}).get("password", "")
+                    }
+                    for cp in data.get("charging_points", [])
+                ]
+            }
         except FileNotFoundError:
             return {"registered_cps": []}
-        
+
 
 def save_registry(registry_data):
     with DB_LOCK:
         try:
-            # Leer db.json actual
             with open(REGISTRY_DB, "r") as f:
                 db = json.load(f)
         except FileNotFoundError:
             db = {"charging_points": [], "drivers": []}
-        
-        # Actualizar charging_points con datos del registry
+
         db["charging_points"] = [
             {
                 "id": cp["id"],
                 "address": cp["address"],
                 "price": cp["price"],
-                "status": "INACTIVE",  # Estado inicial
+                "status": "INACTIVE",
                 "driver": "",
                 "kwh_consumed": 0,
                 "money_consumed": 0
             }
             for cp in registry_data["registered_cps"]
         ]
-        
-        # Guardar
+
         with open(REGISTRY_DB, "w") as f:
             json.dump(db, f, indent=4)
             
@@ -69,22 +80,19 @@ def register_cp():
     cp_id = data.get("id")
     address = data.get("address")
     price = data.get("price")
-    
+
     if not cp_id or not address or price is None:
         return jsonify({"status": "ERROR", "message": "Faltan datos"}), 400
-    
+
     registry = load_registry()
-    
-    # Verificar si ya existe
+
     for cp in registry["registered_cps"]:
         if cp["id"] == cp_id:
             return jsonify({"status": "ERROR", "message": "CP ya registrado"}), 409
-    
-    # Generar credenciales (username y password)
+
     username = f"cp_{cp_id}"
     password = secrets.token_urlsafe(16)
-    
-    # AÃ±adir al registro
+
     registry["registered_cps"].append({
         "id": cp_id,
         "address": address,
@@ -93,9 +101,14 @@ def register_cp():
         "password": password
     })
     save_registry(registry)
-    
+
+    # Guardar credenciales persistentemente
+    creds = load_credentials()
+    creds[cp_id] = {"username": username, "password": password}
+    save_credentials(creds)
+
     print(f"[Registry] CP {cp_id} registrado exitosamente")
-    
+
     return jsonify({
         "status": "SUCCESS",
         "username": username,

@@ -402,9 +402,10 @@ class DriverTerminal:
 
 # Leer argumentos de línea de comandos
 def args():
-    if len(sys.argv) != 4:
-        sys.exit(1)
-    return sys.argv[1], sys.argv[2], sys.argv[3]
+    broker_ip   = sys.argv[1] if len(sys.argv) > 1 else 'localhost'
+    broker_port = sys.argv[2] if len(sys.argv) > 2 else '9092'
+    driver_id   = sys.argv[3] if len(sys.argv) > 3 else 'Driver1'
+    return broker_ip, broker_port, driver_id
 
 
 if __name__ == "__main__":

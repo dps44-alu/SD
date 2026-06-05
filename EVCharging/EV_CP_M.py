@@ -20,6 +20,19 @@ CURRENT_DRIVER = None
 CHARGING_INFO = {"kwh": 0, "cost": 0}
 RUNNING = True
 PAUSED = False
+CP_USERNAME = None
+CP_PASSWORD = None
+ENCRYPTION_KEY = None
+
+MESSAGE_BUFFER = []
+MESSAGE_LOCK = threading.Lock()
+
+
+def log_message(msg):
+    with MESSAGE_LOCK:
+        MESSAGE_BUFFER.append(f"[{time.strftime('%H:%M:%S')}] {msg}")
+        if len(MESSAGE_BUFFER) > 20:
+            MESSAGE_BUFFER.pop(0)
 
 
 # Limpiar pantalla de forma multiplataforma
@@ -41,52 +54,62 @@ def get_status_display(status):
 
 # Mostrar pantalla de monitorización actualizada continuamente
 def display_monitor_screen():
-    global CP_ID, CP_ADDRESS, CP_PRICE, CP_STATUS, CURRENT_DRIVER, CHARGING_INFO, PAUSED
-    
+    last_state = None
+
     while RUNNING:
         if not PAUSED:
-            clear_screen()
-            
-            status_text, color_text = get_status_display(CP_STATUS)
-            
-            print(f"{'='*70}")
-            print(f"  MONITOR CP - SISTEMA DE MONITORIZACIÓN EN TIEMPO REAL")
-            print(f"{'='*70}")
-            print(f"  ID del Punto de Carga: {CP_ID}")
-            print(f"  Dirección: {CP_ADDRESS}")
-            print(f"  Precio: {CP_PRICE}€/kWh")
-            print(f"{'='*70}")
-            print(f"  Estado: {status_text} ({color_text})")
-            print(f"{'='*70}")
-            
-            if CP_STATUS == "BUSY" and CURRENT_DRIVER:
-                print(f"\n  CARGA EN PROGRESO")
-                print(f"  {'-'*66}")
-                print(f"    Conductor: {CURRENT_DRIVER}")
-                print(f"    Consumo actual: {CHARGING_INFO['kwh']:.2f} kWh")
-                print(f"    Importe acumulado: {CHARGING_INFO['cost']:.2f}€")
-                print(f"  {'-'*66}")
-            elif CP_STATUS == "ACTIVE":
-                print(f"\n  Punto de carga listo para recibir solicitudes")
-            elif CP_STATUS == "OUT_OF_ORDER":
-                print(f"\n  Punto de carga fuera de servicio temporalmente")
-            elif CP_STATUS == "BROKEN":
-                print(f"\n  Punto de carga averiado - detenido por Central")
-                print(f"  Requiere comando RESUME para volver a operar")
-            elif CP_STATUS == "INACTIVE":
-                print(f"\n  ⸻ Punto de carga inactivo")
-            
-            print(f"\n{'='*70}")
-            print(f"  CONTROLES:")
-            print(f"  - Presiona '1' + ENTER para solicitar carga manual")
-            print(f"  - Presiona '2' + ENTER para ver estado detallado")
-            print(f"  - Presiona '3' + ENTER para re-registrar en Registry") 
-            print(f"  - Presiona '0' + ENTER para salir")
-            print(f"{'='*70}")
-            print(f"\n  Actualización automática cada 1 segundo...")
-            print(f"  (La pantalla se actualiza en tiempo real)")
-        
-        time.sleep(1)
+            with MESSAGE_LOCK:
+                msgs = list(MESSAGE_BUFFER)
+
+            current_state = (
+                CP_STATUS, CURRENT_DRIVER,
+                CHARGING_INFO['kwh'], CHARGING_INFO['cost'],
+                tuple(msgs)
+            )
+
+            if current_state != last_state:
+                last_state = current_state
+                clear_screen()
+
+                status_text, color_text = get_status_display(CP_STATUS)
+
+                print(f"{'='*70}")
+                print(f"  MONITOR CP - {CP_ID}")
+                print(f"{'='*70}")
+                print(f"  Dirección : {CP_ADDRESS}")
+                print(f"  Precio    : {CP_PRICE}€/kWh")
+                print(f"  Estado    : {status_text} ({color_text})")
+                print(f"{'='*70}")
+
+                if CP_STATUS == "BUSY" and CURRENT_DRIVER:
+                    print(f"\n  CARGA EN PROGRESO")
+                    print(f"  {'-'*66}")
+                    print(f"    Conductor         : {CURRENT_DRIVER}")
+                    print(f"    Consumo actual    : {CHARGING_INFO['kwh']:.2f} kWh")
+                    print(f"    Importe acumulado : {CHARGING_INFO['cost']:.2f}€")
+                    print(f"  {'-'*66}")
+                elif CP_STATUS == "ACTIVE":
+                    print(f"\n  Punto de carga listo para recibir solicitudes")
+                elif CP_STATUS == "OUT_OF_ORDER":
+                    print(f"\n  Punto de carga fuera de servicio temporalmente")
+                elif CP_STATUS == "BROKEN":
+                    print(f"\n  Punto de carga averiado - detenido por Central")
+                    print(f"  Requiere comando RESUME para volver a operar")
+                elif CP_STATUS == "INACTIVE":
+                    print(f"\n  Punto de carga inactivo")
+
+                if msgs:
+                    print(f"\n{'─'*70}")
+                    print(f"  MENSAJES DEL SISTEMA")
+                    print(f"{'─'*70}")
+                    for m in msgs[-6:]:
+                        print(f"  {m}")
+
+                print(f"\n{'='*70}")
+                print(f"  1: carga manual  |  2: estado detallado  |  3: re-registrar  |  0: salir")
+                print(f"{'='*70}")
+
+        time.sleep(0.5)
 
 
 # Obtiene la configuración completa desde Central
@@ -145,7 +168,8 @@ def send_config_to_engine(engine_ip, engine_port, cp_id):
                 client.settimeout(2)
                 client.connect((engine_ip, engine_port))
                 
-                msg = f"SET_CONFIG#{cp_id}#{CP_PRICE}#{CP_ADDRESS}"
+                key_part = ENCRYPTION_KEY if ENCRYPTION_KEY else ""
+                msg = f"SET_CONFIG#{cp_id}#{CP_PRICE}#{CP_ADDRESS}#{key_part}"
                 client.sendall(msg.encode())
                 
                 response = client.recv(1024).decode()
@@ -165,24 +189,30 @@ def send_config_to_engine(engine_ip, engine_port, cp_id):
 
 # Se conecta y autentica con central
 def connect_central(central_ip, central_port, cp_id):
-    global CP_PRICE, CP_ADDRESS, CP_STATUS
-    
+    global CP_PRICE, CP_ADDRESS, CP_STATUS, ENCRYPTION_KEY
+
     central_conn = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     central_conn.connect((central_ip, central_port))
     print(f"[Monitor] Conectado a Central {central_ip}:{central_port}")
 
-    msg = f"AUTH#{cp_id}#{CP_ADDRESS}#{CP_PRICE}#{CP_STATUS}"
+    username = CP_USERNAME or ""
+    password = CP_PASSWORD or ""
+    msg = f"AUTH#{cp_id}#{CP_ADDRESS}#{CP_PRICE}#{CP_STATUS}#{username}#{password}"
     central_conn.sendall(msg.encode())
-    print(f"[Monitor] Enviando AUTH a Central:")
-    print(f"          ID: {cp_id}")
-    print(f"          Dirección: {CP_ADDRESS}")
-    print(f"          Precio: {CP_PRICE}€/kWh")
-    print(f"          Estado: {CP_STATUS}")
+    print(f"[Monitor] Enviando AUTH a Central (user={username})")
 
     response = central_conn.recv(1024).decode()
-    print(f"[Monitor] Respuesta de Central: {response}")
 
-    if response != "ACCEPTED":
+    if response.startswith("ACCEPTED"):
+        parts = response.split("#")
+        if len(parts) == 2:
+            ENCRYPTION_KEY = parts[1]
+            print(f"[Monitor] Autenticado. Clave de cifrado recibida.")
+            log_message("Autenticado en Central. Clave de cifrado recibida.")
+        else:
+            print(f"[Monitor] Autenticado (sin clave de cifrado).")
+            log_message("Autenticado en Central.")
+    else:
         print("[Monitor] Conexión rechazada por Central. Cerrando...")
         central_conn.close()
         exit(1)
@@ -213,34 +243,26 @@ def listen_central_commands(central_conn, engine_ip, engine_port, cp_id):
                 command = parts[2]
                 
                 if cmd_cp_id == cp_id:
-                    print(f"\n[Monitor] Comando recibido de Central: {command}")
-                    
-                    # Reenviar comando al Engine
+                    log_message(f"Comando recibido de Central: {command}")
+
                     try:
                         with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as engine_client:
                             engine_client.settimeout(3)
                             engine_client.connect((engine_ip, engine_port))
                             engine_client.sendall(command.encode())
-                            
-                            # Esperar respuesta del Engine
-                            response = engine_client.recv(1024).decode()
-                            print(f"[Monitor] Respuesta del Engine: {response}")
-                            
-                            # Confirmar a Central
-                            central_conn.sendall(response.encode())
-                            
-                            # Actualizar estado según comando
-                            if command == "STOP":
-                                # Cambiar a BROKEN en lugar de OUT_OF_ORDER
-                                CP_STATUS = "BROKEN"                                    
-                                print(f"[Monitor] CP {cp_id} detenido - estado: BROKEN (Averiado)")
 
+                            response = engine_client.recv(1024).decode()
+                            central_conn.sendall(response.encode())
+
+                            if command == "STOP":
+                                CP_STATUS = "BROKEN"
+                                log_message(f"CP {cp_id} detenido por Central → BROKEN")
                             elif command == "RESUME":
                                 CP_STATUS = "ACTIVE"
-                                print(f"[Monitor] CP {cp_id} reanudado - estado: ACTIVE")
-                                
+                                log_message(f"CP {cp_id} reanudado por Central → ACTIVE")
+
                     except Exception as e:
-                        print(f"[Monitor] Error reenviando comando al Engine: {e}")
+                        log_message(f"Error reenviando comando al Engine: {e}")
                         central_conn.sendall(b"ERROR")
                         
         except socket.timeout:
@@ -276,14 +298,19 @@ def connect_engine(central_conn, engine_ip, engine_port, cp_id):
                         new_kwh = float(parts[2])
                         new_cost = float(parts[3])
                         
-                        if (new_driver != last_driver or 
-                            new_kwh != last_charging_info["kwh"] or 
+                        if (new_driver != last_driver or
+                            new_kwh != last_charging_info["kwh"] or
                             new_cost != last_charging_info["cost"]):
-                            
+
+                            if new_driver and new_driver != last_driver:
+                                log_message(f"Carga iniciada: conductor {new_driver}")
+                            elif not new_driver and last_driver:
+                                log_message(f"Carga finalizada. Conductor {last_driver}")
+
                             CURRENT_DRIVER = new_driver
                             CHARGING_INFO["kwh"] = new_kwh
                             CHARGING_INFO["cost"] = new_cost
-                            
+
                             last_driver = new_driver
                             last_charging_info = {"kwh": new_kwh, "cost": new_cost}
                             
@@ -296,8 +323,7 @@ def connect_engine(central_conn, engine_ip, engine_port, cp_id):
                     last_charging_info = {"kwh": 0, "cost": 0}
 
                 if new_status and new_status != CP_STATUS:
-                    print(f"[Monitor] Cambio detectado: {CP_STATUS} -> {new_status}")
-                    print(f"          Notificando a Central...")
+                    log_message(f"Estado: {CP_STATUS} → {new_status}")
                     CP_STATUS = new_status
 
                     msg = f"CHANGE#{cp_id}#None#None#{new_status}"
@@ -507,38 +533,65 @@ def show_detailed_status(engine_ip, engine_port):
             time.sleep(1)
 
 
+def save_local_credentials(cp_id, username, password):
+    import json
+    creds_file = f"creds_{cp_id}.json"
+    with open(creds_file, "w") as f:
+        json.dump({"username": username, "password": password}, f)
+
+
+def load_local_credentials(cp_id):
+    import json
+    creds_file = f"creds_{cp_id}.json"
+    try:
+        with open(creds_file, "r") as f:
+            data = json.load(f)
+            return data.get("username"), data.get("password")
+    except FileNotFoundError:
+        return None, None
+
+
 # Registra el CP en EV_Registry vía API REST
 # Retorna (success, username, password)
 def register_with_registry(registry_url, cp_id, address, price):
     try:
         print(f"[Monitor] Registrando CP {cp_id} en Registry...")
-        
+
         response = requests.post(
             f"{registry_url}/register",
-            json = {
-                "id": cp_id,
-                "address": address,
-                "price": price
-            },
-            verify = False,         # Ignorar certificado SSL autofirmado
-            timeout = 5
+            json={"id": cp_id, "address": address, "price": price},
+            verify=False,
+            timeout=5
         )
-        
+
         if response.status_code == 201:
             data = response.json()
+            username = data['username']
+            password = data['password']
             print(f"[Monitor] CP registrado exitosamente")
-            print(f"          Username: {data['username']}")
-            print(f"          Password: {data['password']}")
-            return True, data['username'], data['password']
-        
+            print(f"          Username: {username}")
+            save_local_credentials(cp_id, username, password)
+            return True, username, password
+
         elif response.status_code == 409:
-            print(f"[Monitor] CP ya estaba registrado")
-            return True, None, None
-        
+            print(f"[Monitor] CP ya estaba registrado, cargando credenciales locales...")
+            username, password = load_local_credentials(cp_id)
+            if username:
+                print(f"          Username: {username}")
+                return True, username, password
+            else:
+                print(f"[Monitor] Sin credenciales locales. Borrando y re-registrando...")
+                requests.delete(
+                    f"{registry_url}/register/{cp_id}",
+                    verify=False,
+                    timeout=5
+                )
+                return register_with_registry(registry_url, cp_id, address, price)
+
         else:
             print(f"[Monitor] Error en registro: {response.json()}")
             return False, None, None
-            
+
     except Exception as e:
         print(f"[Monitor] Error conectando con Registry: {e}")
         return False, None, None
@@ -546,37 +599,44 @@ def register_with_registry(registry_url, cp_id, address, price):
 
 # Función principal
 def main(engine_ip, engine_port, central_ip, central_port, cp_id):
-    global CP_ID, RUNNING
+    global CP_ID, RUNNING, CP_USERNAME, CP_PASSWORD, CP_ADDRESS, CP_PRICE
+
     CP_ID = cp_id
-    
-    # Intentar registro en Registry primero
-    registry_url = "https://localhost:5001"                     # URL del Registry
-    print(f"[Monitor] Intentando registro en Registry...")
-    
-    # Obtener config de Central primero para tener address y price
+    registry_url = "https://localhost:5001"
+
     print(f"[Monitor] Solicitando configuración a Central para CP: {cp_id}")
     if not get_config_from_central(central_ip, central_port, cp_id):
-        # Si no existe en Central, solicitar datos para registro
         print(f"\n[Monitor] CP no encontrado en sistema. Iniciando proceso de registro...")
         CP_ADDRESS = input("  Dirección del CP: ").strip()
         CP_PRICE = float(input("  Precio (€/kWh): ").strip())
-        
-        # Registrar en Registry
+
         success, username, password = register_with_registry(
             registry_url, cp_id, CP_ADDRESS, CP_PRICE
         )
-        
+
         if not success:
             print("[Monitor] Error crítico: no se pudo registrar en Registry")
             return
-        
+
+        CP_USERNAME = username
+        CP_PASSWORD = password
+
         print(f"[Monitor] Esperando 2 segundos para que Registry actualice la BD...")
         time.sleep(2)
-        
-        # Reintentar obtener config
+
         if not get_config_from_central(central_ip, central_port, cp_id):
             print("[Monitor] Error: aún no se puede obtener configuración")
             return
+    else:
+        # CP already in Central — load credentials from local file or Registry
+        username, password = load_local_credentials(cp_id)
+        if not username:
+            print(f"[Monitor] Registrando en Registry para obtener credenciales...")
+            success, username, password = register_with_registry(
+                registry_url, cp_id, CP_ADDRESS, CP_PRICE
+            )
+        CP_USERNAME = username
+        CP_PASSWORD = password
     
     print(f"[Monitor] Enviando configuración al Engine...")
     if not send_config_to_engine(engine_ip, engine_port, cp_id):
@@ -615,7 +675,12 @@ def main(engine_ip, engine_port, central_ip, central_port, cp_id):
 
 # Leer argumentos de línea de comandos
 def args():
-    return sys.argv[1], int(sys.argv[2]), sys.argv[3], int(sys.argv[4]), sys.argv[5]
+    engine_ip    = sys.argv[1] if len(sys.argv) > 1 else 'localhost'
+    engine_port  = int(sys.argv[2]) if len(sys.argv) > 2 else 6000
+    central_ip   = sys.argv[3] if len(sys.argv) > 3 else 'localhost'
+    central_port = int(sys.argv[4]) if len(sys.argv) > 4 else 5000
+    cp_id        = sys.argv[5] if len(sys.argv) > 5 else 'ALC1'
+    return engine_ip, engine_port, central_ip, central_port, cp_id
 
 
 if __name__ == "__main__":
