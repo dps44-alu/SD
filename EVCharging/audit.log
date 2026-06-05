@@ -13,3 +13,7 @@
 2026-06-05 22:06:34 | SYSTEM_START         | central         | port=5000 broker=localhost:9092
 2026-06-05 22:06:50 | AUTH_SUCCESS         | 127.0.0.1       | cp_id=ALC1 user=cp_ALC1
 2026-06-05 22:07:37 | CHARGE_END           | ALC1            | driver=Driver1 kwh=10.00 cost=5.00
+2026-06-05 22:59:07 | SYSTEM_START         | central         | port=5100 broker=localhost:9092
+2026-06-05 22:59:38 | SYSTEM_START         | central         | port=5100 broker=localhost:9092
+2026-06-05 23:00:21 | AUTH_SUCCESS         | 127.0.0.1       | cp_id=ALC1 user=cp_ALC1
+2026-06-05 23:02:40 | CHARGE_END           | ALC1            | driver=Driver1 kwh=30.00 cost=15.00

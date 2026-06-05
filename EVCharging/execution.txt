@@ -39,9 +39,10 @@ rm -f db.json credentials.json audit.log creds_*.json
 
 5. EV_CP_M / Monitor (monitor del punto de carga)
    python3 EV_CP_M.py
-   # Con parámetros: python3 EV_CP_M.py <ENGINE_IP> <ENGINE_PORT> <CENTRAL_IP> <CENTRAL_PORT> <CP_ID>
-   # Valores por defecto: localhost 6000 localhost 5000 ALC1
+   # Con parámetros: python3 EV_CP_M.py <ENGINE_IP> <ENGINE_PORT> <CENTRAL_IP> <CENTRAL_PORT> <CP_ID> <REGISTRY_IP> <REGISTRY_PORT>
+   # Valores por defecto: localhost 6000 localhost 5000 ALC1 localhost 5001
    # Al arrancar: se registra en Registry, obtiene config de Central y clave de cifrado
+   # Si Central cae y vuelve, el Monitor reconecta automáticamente
 
 6. EV_Driver (aplicación del conductor)
    python3 EV_Driver.py

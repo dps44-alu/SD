@@ -692,7 +692,13 @@ def listen_cp_consumption(broker_ip, broker_port):
                     stop_charging_point(cp_id)
                     log_message(f"Central: {cp_id} → OUT_OF_ORDER (alerta climática pendiente)")
                 else:
-                    update_charging_point(cp_id, "ACTIVE")
+                    with CONNECTIONS_LOCK:
+                        monitor_connected = cp_id in ACTIVE_CONNECTIONS
+                    if monitor_connected:
+                        update_charging_point(cp_id, "ACTIVE")
+                    else:
+                        update_charging_point(cp_id, "INACTIVE")
+                        log_message(f"Central: {cp_id} → INACTIVE (Monitor desconectado)")
 
             with CHARGING_START_LOCK:
                 CHARGING_START_TIMES.pop(cp_id, None)
@@ -926,7 +932,16 @@ def handle_monitor_connection(conn, addr):
             with CONNECTIONS_LOCK:
                 if cp_id in ACTIVE_CONNECTIONS:
                     del ACTIVE_CONNECTIONS[cp_id]
-                    log_message(f"Central: Conexión eliminada CP {cp_id}")
+            # Mark INACTIVE so no new charges are accepted while Monitor is down
+            cp = get_charging_point(cp_id)
+            if cp:
+                update_charging_point(
+                    cp_id, "INACTIVE",
+                    cp.get("driver", ""),
+                    cp.get("kwh_consumed", 0),
+                    cp.get("money_consumed", 0)
+                )
+            log_message(f"Central: CP {cp_id} desconectado → INACTIVE")
         conn.close()
 
 
