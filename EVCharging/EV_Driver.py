@@ -19,6 +19,7 @@ class DriverTerminal:
         self.manual_charge_active = False
         self.last_consumption = {"kwh": 0, "cost": 0}
         self.menu_blocked = False
+        self.pending_ack = False
         
         # Kafka Producer
         self.producer = KafkaProducer(
@@ -304,22 +305,28 @@ class DriverTerminal:
                 print(f"  Energía consumida: {kwh:.2f} kWh")
                 print(f"  Importe total: {cost:.2f}€")
                 print(f"{'='*60}\n")
-                
-                # Si era una carga manual y el menú no está bloqueado por otra operación
-                if self.manual_charge_active and not self.menu_blocked:
-                    print(f"  Carga manual completada. Presiona ENTER para continuar...")
-                    self.manual_charge_active = False
-                
+
                 self.charging = False
                 self.current_cp = None
-        
+                self.manual_charge_active = False
+                if not self.menu_blocked:
+                    self.pending_ack = True
+
+        elif msg_type == "CENTRAL_DOWN":
+            if cp_id == self.current_cp or not self.current_cp:
+                print(f"\n{'!'*60}")
+                print(f"  AVISO: Central se ha desconectado")
+                print(f"  La carga en {cp_id} continúa en el Engine.")
+                print(f"  Recibirás el ticket cuando Central vuelva a estar activa.")
+                print(f"{'!'*60}\n")
+
         elif msg_type == "CHARGE_INTERRUPTED":
             # Manejar carga interrumpida
             if cp_id == self.current_cp or not self.current_cp:
                 kwh = float(parts[3])
                 cost = float(parts[4])
                 reason = parts[5] if len(parts) > 5 else "motivo desconocido"
-                
+
                 print(f"\n{'='*60}")
                 print(f"  CARGA INTERRUMPIDA")
                 print(f"{'='*60}")
@@ -328,14 +335,12 @@ class DriverTerminal:
                 print(f"  Energía consumida (parcial): {kwh:.2f} kWh")
                 print(f"  Importe cobrado: {cost:.2f}€")
                 print(f"{'='*60}\n")
-                
-                # Si era una carga manual y el menú no está bloqueado por otra operación
-                if self.manual_charge_active and not self.menu_blocked:
-                    print(f"  Presiona ENTER para continuar...")
-                    self.manual_charge_active = False
-                
+
                 self.charging = False
                 self.current_cp = None
+                self.manual_charge_active = False
+                if not self.menu_blocked:
+                    self.pending_ack = True
     
     
     # Actualizar lista de CPs disponibles desde BD
@@ -369,7 +374,12 @@ class DriverTerminal:
             try:
                 self.show_menu()
                 option = input("\n  Selecciona una opción: ").strip()
-                
+
+                if self.pending_ack:
+                    self.pending_ack = False
+                    input("\n  Presiona ENTER para volver al menú...")
+                    continue
+
                 if option == "1":
                     self.show_available_cps()
                     input("  Presiona ENTER para continuar...")

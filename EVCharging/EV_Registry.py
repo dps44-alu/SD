@@ -56,15 +56,17 @@ def save_registry(registry_data):
         except FileNotFoundError:
             db = {"charging_points": [], "drivers": []}
 
+        existing = {cp["id"]: cp for cp in db.get("charging_points", [])}
+
         db["charging_points"] = [
             {
                 "id": cp["id"],
                 "address": cp["address"],
                 "price": cp["price"],
-                "status": "INACTIVE",
-                "driver": "",
-                "kwh_consumed": 0,
-                "money_consumed": 0
+                "status": existing.get(cp["id"], {}).get("status", "INACTIVE"),
+                "driver": existing.get(cp["id"], {}).get("driver", ""),
+                "kwh_consumed": existing.get(cp["id"], {}).get("kwh_consumed", 0),
+                "money_consumed": existing.get(cp["id"], {}).get("money_consumed", 0)
             }
             for cp in registry_data["registered_cps"]
         ]

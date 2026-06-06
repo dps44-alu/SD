@@ -17,3 +17,119 @@
 2026-06-05 22:59:38 | SYSTEM_START         | central         | port=5100 broker=localhost:9092
 2026-06-05 23:00:21 | AUTH_SUCCESS         | 127.0.0.1       | cp_id=ALC1 user=cp_ALC1
 2026-06-05 23:02:40 | CHARGE_END           | ALC1            | driver=Driver1 kwh=30.00 cost=15.00
+2026-06-06 12:59:45 | SYSTEM_START         | central         | port=5000 broker=localhost:9092
+2026-06-06 13:01:29 | SYSTEM_START         | central         | port=5000 broker=localhost:9092
+2026-06-06 13:03:04 | AUTH_SUCCESS         | 127.0.0.1       | cp_id=ALC1 user=cp_ALC1
+2026-06-06 13:16:29 | SYSTEM_START         | central         | port=5100 broker=localhost:9092
+2026-06-06 13:18:17 | AUTH_SUCCESS         | 127.0.0.1       | cp_id=ALC1 user=cp_ALC1
+2026-06-06 13:20:37 | AUTH_SUCCESS         | 127.0.0.1       | cp_id=ALC2 user=cp_ALC2
+2026-06-06 13:28:47 | SYSTEM_START         | central         | port=5100 broker=localhost:9092
+2026-06-06 13:29:01 | AUTH_SUCCESS         | 127.0.0.1       | cp_id=ALC1 user=cp_ALC1
+2026-06-06 13:29:18 | AUTH_SUCCESS         | 127.0.0.1       | cp_id=ALC2 user=cp_ALC2
+2026-06-06 13:29:54 | CHARGE_END           | ALC1            | driver=Driver2 kwh=10.00 cost=5.00
+2026-06-06 13:30:36 | CHARGE_END           | ALC2            | driver=Driver1 kwh=10.00 cost=4.80
+2026-06-06 13:31:31 | CHARGE_END           | ALC1            | driver=Driver2 kwh=10.00 cost=5.00
+2026-06-06 13:31:47 | CHARGE_END           | ALC2            | driver=Driver1 kwh=30.00 cost=14.40
+2026-06-06 13:33:37 | CHARGE_END           | ALC1            | driver=Driver2 kwh=10.00 cost=5.00
+2026-06-06 13:33:52 | CHARGE_END           | ALC1            | driver=Driver2 kwh=10.00 cost=5.00
+2026-06-06 13:34:08 | CHARGE_END           | ALC1            | driver=Driver2 kwh=10.00 cost=5.00
+2026-06-06 13:34:22 | CHARGE_END           | ALC1            | driver=Driver2 kwh=10.00 cost=5.00
+2026-06-06 13:34:36 | CHARGE_END           | ALC1            | driver=Driver2 kwh=10.00 cost=5.00
+2026-06-06 13:34:51 | CHARGE_END           | ALC2            | driver=Driver2 kwh=10.00 cost=4.80
+2026-06-06 13:35:06 | CHARGE_END           | ALC2            | driver=Driver2 kwh=10.00 cost=4.80
+2026-06-06 13:35:20 | CHARGE_END           | ALC2            | driver=Driver2 kwh=10.00 cost=4.80
+2026-06-06 13:35:35 | CHARGE_END           | ALC2            | driver=Driver2 kwh=10.00 cost=4.80
+2026-06-06 13:35:49 | CHARGE_END           | ALC2            | driver=Driver2 kwh=10.00 cost=4.80
+2026-06-06 13:36:04 | CHARGE_END           | ALC1            | driver=Driver2 kwh=10.00 cost=5.00
+2026-06-06 13:36:19 | CHARGE_END           | ALC2            | driver=Driver2 kwh=10.00 cost=4.80
+2026-06-06 13:37:09 | CHARGE_END           | ALC1            | driver=Driver2 kwh=10.00 cost=5.00
+2026-06-06 13:37:12 | CHARGE_END           | ALC2            | driver=Driver1 kwh=10.00 cost=4.80
+2026-06-06 13:37:23 | CHARGE_END           | ALC2            | driver=Driver2 kwh=10.00 cost=4.80
+2026-06-06 13:38:35 | CHARGE_END           | ALC1            | driver=Driver2 kwh=10.00 cost=5.00
+2026-06-06 13:38:54 | CHARGE_END           | ALC1            | driver=Driver2 kwh=10.00 cost=5.00
+2026-06-06 13:39:01 | CHARGE_END           | ALC2            | driver=Driver1 kwh=30.00 cost=14.40
+2026-06-06 13:49:09 | AUTH_SUCCESS         | 127.0.0.1       | cp_id=ALC1 user=cp_ALC1
+2026-06-06 13:51:21 | AUTH_FAIL            | 127.0.0.1       | cp_id=ALC1 user=cp_ALC1
+2026-06-06 13:51:44 | AUTH_SUCCESS         | 127.0.0.1       | cp_id=ALC1 user=cp_ALC1
+2026-06-06 15:00:30 | SYSTEM_START         | central         | port=5100 broker=localhost:9092
+2026-06-06 15:00:41 | AUTH_SUCCESS         | 127.0.0.1       | cp_id=ALC1 user=cp_ALC1
+2026-06-06 15:03:21 | AUTH_SUCCESS         | 127.0.0.1       | cp_id=ALC1 user=cp_ALC1
+2026-06-06 15:04:55 | CHARGE_END           | ALC1            | driver=Driver1 kwh=30.00 cost=15.00
+2026-06-06 15:05:09 | AUTH_SUCCESS         | 127.0.0.1       | cp_id=ALC1 user=cp_ALC1
+2026-06-06 15:09:47 | SYSTEM_START         | central         | port=5100 broker=localhost:9092
+2026-06-06 15:09:56 | AUTH_SUCCESS         | 127.0.0.1       | cp_id=ALC1 user=cp_ALC1
+2026-06-06 15:12:23 | SYSTEM_START         | central         | port=5100 broker=localhost:9092
+2026-06-06 15:12:41 | AUTH_SUCCESS         | 127.0.0.1       | cp_id=ALC1 user=cp_ALC1
+2026-06-06 15:13:22 | SYSTEM_START         | central         | port=5100 broker=localhost:9092
+2026-06-06 15:13:32 | AUTH_SUCCESS         | 127.0.0.1       | cp_id=ALC1 user=cp_ALC1
+2026-06-06 15:13:55 | CHARGE_END           | ALC1            | driver=Driver1 kwh=10.00 cost=5.00
+2026-06-06 15:15:01 | AUTH_SUCCESS         | 127.0.0.1       | cp_id=ALC1 user=cp_ALC1
+2026-06-06 18:48:15 | SYSTEM_START         | central         | port=5100 broker=localhost:9092
+2026-06-06 18:48:25 | AUTH_SUCCESS         | 127.0.0.1       | cp_id=ALC1 user=cp_ALC1
+2026-06-06 18:48:52 | CHARGE_INTERRUPTED   | ALC1            | driver=Driver1 kwh=6.00 cost=3.00
+2026-06-06 18:59:31 | SYSTEM_START         | central         | port=5100 broker=localhost:9092
+2026-06-06 18:59:41 | AUTH_SUCCESS         | 127.0.0.1       | cp_id=ALC1 user=cp_ALC1
+2026-06-06 19:00:15 | CHARGE_END           | ALC1            | driver=Driver1 kwh=30.00 cost=15.00
+2026-06-06 19:03:38 | SYSTEM_START         | central         | port=5100 broker=localhost:9092
+2026-06-06 19:03:50 | AUTH_SUCCESS         | 127.0.0.1       | cp_id=ALC1 user=cp_ALC1
+2026-06-06 19:04:35 | CHARGE_END           | ALC1            | driver=Driver1 kwh=30.00 cost=15.00
+2026-06-06 19:05:19 | CHARGE_END           | ALC1            | driver=Driver1 kwh=10.00 cost=5.00
+2026-06-06 19:05:52 | CHARGE_INTERRUPTED   | ALC1            | driver=Driver1 kwh=2.00 cost=1.00
+2026-06-06 19:06:14 | CHARGE_END           | ALC1            | driver=Driver1 kwh=10.00 cost=5.00
+2026-06-06 19:10:21 | SYSTEM_START         | central         | port=5100 broker=localhost:9092
+2026-06-06 19:10:31 | AUTH_SUCCESS         | 127.0.0.1       | cp_id=ALC1 user=cp_ALC1
+2026-06-06 19:10:54 | CHARGE_END           | ALC1            | driver=Driver1 kwh=10.00 cost=5.00
+2026-06-06 19:14:55 | AUTH_FAIL            | 127.0.0.1       | cp_id=ALC2 user=cp_ALC2
+2026-06-06 19:22:29 | SYSTEM_START         | central         | port=5100 broker=localhost:9092
+2026-06-06 19:22:40 | AUTH_SUCCESS         | 127.0.0.1       | cp_id=ALC1 user=cp_ALC1
+2026-06-06 19:22:52 | AUTH_FAIL            | 127.0.0.1       | cp_id=ALC2 user=cp_ALC2
+2026-06-06 19:22:52 | AUTH_SUCCESS         | 127.0.0.1       | cp_id=ALC2 user=cp_ALC2
+2026-06-06 19:24:32 | SYSTEM_START         | central         | port=5100 broker=localhost:9092
+2026-06-06 19:24:33 | AUTH_SUCCESS         | 127.0.0.1       | cp_id=ALC1 user=cp_ALC1
+2026-06-06 19:24:34 | AUTH_SUCCESS         | 127.0.0.1       | cp_id=ALC2 user=cp_ALC2
+2026-06-06 19:24:46 | CHARGE_END           | ALC2            | driver=Driver2 kwh=10.00 cost=4.80
+2026-06-06 19:37:12 | SYSTEM_START         | central         | port=5100 broker=localhost:9092
+2026-06-06 19:37:20 | AUTH_SUCCESS         | 127.0.0.1       | cp_id=ALC1 user=cp_ALC1
+2026-06-06 19:39:40 | AUTH_SUCCESS         | 127.0.0.1       | cp_id=ALC1 user=cp_ALC1
+2026-06-06 19:40:14 | AUTH_SUCCESS         | 127.0.0.1       | cp_id=ALC2 user=cp_ALC2
+2026-06-06 19:41:20 | SYSTEM_START         | central         | port=5100 broker=localhost:9092
+2026-06-06 19:41:22 | AUTH_SUCCESS         | 127.0.0.1       | cp_id=ALC2 user=cp_ALC2
+2026-06-06 19:41:22 | AUTH_SUCCESS         | 127.0.0.1       | cp_id=ALC1 user=cp_ALC1
+2026-06-06 19:41:23 | CHARGE_END           | ALC1            | driver=Driver1 kwh=10.00 cost=5.00
+2026-06-06 19:51:34 | SYSTEM_START         | central         | port=5100 broker=localhost:9092
+2026-06-06 19:51:42 | AUTH_SUCCESS         | 127.0.0.1       | cp_id=ALC1 user=cp_ALC1
+2026-06-06 19:52:02 | AUTH_SUCCESS         | 127.0.0.1       | cp_id=ALC2 user=cp_ALC2
+2026-06-06 19:57:25 | SYSTEM_START         | central         | port=5100 broker=localhost:9092
+2026-06-06 19:57:35 | AUTH_SUCCESS         | 127.0.0.1       | cp_id=ALC1 user=cp_ALC1
+2026-06-06 19:58:29 | SYSTEM_START         | central         | port=5100 broker=localhost:9092
+2026-06-06 19:58:34 | AUTH_SUCCESS         | 127.0.0.1       | cp_id=ALC1 user=cp_ALC1
+2026-06-06 19:58:35 | CHARGE_END           | ALC1            | driver=Driver1 kwh=10.00 cost=5.00
+2026-06-06 20:43:36 | SYSTEM_START         | central         | port=5100 broker=localhost:9092
+2026-06-06 20:45:49 | SYSTEM_START         | central         | port=5100 broker=localhost:9092
+2026-06-06 20:58:20 | SYSTEM_START         | central         | port=5100 broker=localhost:9092
+2026-06-06 21:04:03 | SYSTEM_START         | central         | port=5100 broker=localhost:9092
+2026-06-06 21:06:57 | SYSTEM_START         | central         | port=5100 broker=localhost:9092
+2026-06-06 21:12:58 | AUTH_SUCCESS         | 127.0.0.1       | cp_id=ALC1 user=cp_ALC1
+2026-06-06 21:13:07 | AUTH_SUCCESS         | 127.0.0.1       | cp_id=ALC2 user=cp_ALC2
+2026-06-06 21:15:45 | CHARGE_END           | ALC2            | driver=Driver2 kwh=10.00 cost=4.80
+2026-06-06 21:15:58 | CHARGE_END           | ALC1            | driver=Driver1 kwh=30.00 cost=15.00
+2026-06-06 21:16:30 | CHARGE_END           | ALC1            | driver=Driver2 kwh=10.00 cost=5.00
+2026-06-06 21:19:44 | SYSTEM_START         | central         | port=5100 broker=localhost:9092
+2026-06-06 21:19:45 | AUTH_SUCCESS         | 127.0.0.1       | cp_id=ALC2 user=cp_ALC2
+2026-06-06 21:19:45 | AUTH_SUCCESS         | 127.0.0.1       | cp_id=ALC1 user=cp_ALC1
+2026-06-06 21:19:47 | CHARGE_END           | ALC2            | driver=Driver2 kwh=10.00 cost=4.80
+2026-06-06 21:19:47 | CHARGE_END           | ALC1            | driver=Driver2 kwh=10.00 cost=5.00
+2026-06-06 21:21:34 | CHARGE_END           | ALC1            | driver=Driver2 kwh=10.00 cost=5.00
+2026-06-06 21:28:15 | SYSTEM_START         | central         | port=5100 broker=localhost:9092
+2026-06-06 21:28:29 | AUTH_SUCCESS         | 127.0.0.1       | cp_id=ALC1 user=cp_ALC1
+2026-06-06 21:28:37 | AUTH_SUCCESS         | 127.0.0.1       | cp_id=ALC2 user=cp_ALC2
+2026-06-06 21:29:14 | CHARGE_END           | ALC1            | driver=Driver1 kwh=10.00 cost=5.00
+2026-06-06 21:36:08 | SYSTEM_START         | central         | port=5100 broker=localhost:9092
+2026-06-06 21:36:12 | AUTH_SUCCESS         | 127.0.0.1       | cp_id=ALC1 user=cp_ALC1
+2026-06-06 21:36:18 | AUTH_SUCCESS         | 127.0.0.1       | cp_id=ALC2 user=cp_ALC2
+2026-06-06 21:42:57 | WEATHER_ALERT        | EV_W            | cp_id=ALC1 reason=Temperatura bajo 0°C
+2026-06-06 21:44:44 | WEATHER_CANCEL       | EV_W            | cp_id=ALC1
+2026-06-06 21:45:05 | CHARGE_END           | ALC1            | driver=Driver1 kwh=10.00 cost=5.00
+2026-06-06 21:46:22 | WEATHER_ALERT        | EV_W            | cp_id=ALC1 reason=Temperatura bajo 0°C
+2026-06-06 21:46:40 | CHARGE_END           | ALC1            | driver=Driver1 kwh=30.00 cost=15.00
+2026-06-06 21:47:00 | WEATHER_CANCEL       | EV_W            | cp_id=ALC1

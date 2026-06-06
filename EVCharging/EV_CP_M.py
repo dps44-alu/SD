@@ -30,6 +30,8 @@ MESSAGE_LOCK = threading.Lock()
 REGISTRY_URL = "https://localhost:5001"
 RECONNECT_EVENT = threading.Event()
 RECONNECT_GEN = 0
+KEY_REVOKED_FLAG = False
+CENTRAL_CONN = None
 
 
 def log_message(msg):
@@ -109,54 +111,62 @@ def display_monitor_screen():
                     for m in msgs[-6:]:
                         print(f"  {m}")
 
+                if KEY_REVOKED_FLAG:
+                    print(f"\n  {'!'*66}")
+                    print(f"  AVISO: Clave revocada por Central.")
+                    print(f"  Mensajes Kafka no son comprensibles. Usa opcion 4 para re-autenticarte.")
+                    print(f"  {'!'*66}")
+
                 print(f"\n{'='*70}")
-                print(f"  1: carga manual  |  2: estado detallado  |  3: re-registrar  |  0: salir")
+                print(f"  1: carga manual  |  2: estado detallado  |  3: re-registrar  |  4: re-autenticar  |  0: salir")
                 print(f"{'='*70}")
 
         time.sleep(0.5)
 
 
-# Obtiene la configuración completa desde Central
+# Obtiene la configuración completa desde Central.
+# Devuelve "found", "not_found" o "unreachable".
 def get_config_from_central(central_ip, central_port, cp_id):
     global CP_PRICE, CP_ADDRESS, CP_STATUS
-    
-    max_retries = 10
+
+    max_retries = 5
     retry_count = 0
-    
+
     while retry_count < max_retries:
         try:
             with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as client:
                 client.settimeout(3)
                 client.connect((central_ip, central_port))
-                
+
                 msg = f"REQUEST_CONFIG#{cp_id}"
                 client.sendall(msg.encode())
-                
+
                 response = client.recv(1024).decode()
                 parts = response.split("#")
-                
+
                 if parts[0] == "CONFIG_OK" and len(parts) == 4:
                     CP_ADDRESS = parts[1]
                     CP_PRICE = float(parts[2])
                     CP_STATUS = parts[3]
-                    
+
                     print(f"[Monitor] Configuración obtenida de Central:")
                     print(f"          ID: {cp_id}")
                     print(f"          Dirección: {CP_ADDRESS}")
                     print(f"          Precio: {CP_PRICE}€/kWh")
                     print(f"          Estado: {CP_STATUS}")
-                    return True
+                    return "found"
                 elif parts[0] == "CONFIG_NOT_FOUND":
                     print(f"[Monitor] El CP {cp_id} no existe en la base de datos")
-                    return False
-                    
+                    return "not_found"
+
         except Exception as e:
             retry_count += 1
             print(f"[Monitor] Intento {retry_count}/{max_retries} falló: {e}")
-            time.sleep(1)
-    
-    print("[Monitor] No se pudo obtener la configuración de Central")
-    return False
+            if retry_count < max_retries:
+                time.sleep(1)
+
+    print(f"[Monitor] No se pudo conectar con Central en {central_ip}:{central_port}")
+    return "unreachable"
 
 
 # Envía la configuración al Engine
@@ -217,16 +227,16 @@ def connect_central(central_ip, central_port, cp_id):
             print(f"[Monitor] Autenticado (sin clave de cifrado).")
             log_message("Autenticado en Central.")
     else:
-        print("[Monitor] Conexión rechazada por Central. Cerrando...")
+        print("[Monitor] Conexión rechazada por Central (credenciales inválidas).")
         central_conn.close()
-        exit(1)
+        return None
 
     return central_conn
 
 
 # Escucha comandos de Central (STOP, RESUME) y los reenvía al Engine
 def listen_central_commands(central_conn, engine_ip, engine_port, cp_id):
-    global CP_STATUS, RUNNING
+    global CP_STATUS, RUNNING, KEY_REVOKED_FLAG
     
     print(f"[Monitor] Iniciando escucha de comandos de Central para CP {cp_id}...")
     
@@ -243,7 +253,12 @@ def listen_central_commands(central_conn, engine_ip, engine_port, cp_id):
                 
             msg = data.decode()
             parts = msg.split("#")
-            
+
+            if parts[0] == "KEY_REVOKED" and len(parts) > 1 and parts[1] == cp_id:
+                KEY_REVOKED_FLAG = True
+                log_message("AVISO: Clave revocada por Central. Usa opcion 4 para re-autenticarte.")
+                continue
+
             if len(parts) >= 3 and parts[0] == "COMMAND":
                 cmd_cp_id = parts[1]
                 command = parts[2]
@@ -280,81 +295,114 @@ def listen_central_commands(central_conn, engine_ip, engine_port, cp_id):
             break
 
 
-# Se conecta y monitoriza el Engine
+# Se conecta y monitoriza el Engine, con reconexión automática si cae
 def connect_engine(central_conn, engine_ip, engine_port, cp_id, gen=0):
     global CP_STATUS, CURRENT_DRIVER, CHARGING_INFO, RUNNING, RECONNECT_GEN
-    last_driver = ""
-    last_charging_info = {"kwh": 0, "cost": 0}
 
-    try:
-        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as client:
-            client.connect((engine_ip, engine_port))
-            log_message(f"Conectado a Engine {engine_ip}:{engine_port}")
+    while RUNNING and gen == RECONNECT_GEN:
+        last_driver = ""
+        last_charging_info = {"kwh": 0, "cost": 0}
 
-            while RUNNING and gen == RECONNECT_GEN:
-                try:
-                    msg = f"STATUS#{cp_id}"
-                    client.sendall(msg.encode())
-                    response = client.recv(1024).decode()
+        try:
+            with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as client:
+                client.connect((engine_ip, engine_port))
+                log_message(f"Conectado a Engine {engine_ip}:{engine_port}")
 
-                    parts = response.split("#")
-                    new_status = parts[0]
+                # Re-enviar configuración al Engine (necesario tras reinicio)
+                send_config_to_engine(engine_ip, engine_port, cp_id)
 
-                    if len(parts) >= 4:
-                        new_driver = parts[1] if parts[1] != "None" else None
-                        try:
-                            new_kwh = float(parts[2])
-                            new_cost = float(parts[3])
+                while RUNNING and gen == RECONNECT_GEN:
+                    try:
+                        msg = f"STATUS#{cp_id}"
+                        client.sendall(msg.encode())
+                        response = client.recv(1024).decode()
 
-                            if (new_driver != last_driver or
-                                    new_kwh != last_charging_info["kwh"] or
-                                    new_cost != last_charging_info["cost"]):
+                        parts = response.split("#")
+                        new_status = parts[0]
 
-                                if new_driver and new_driver != last_driver:
-                                    log_message(f"Carga iniciada: conductor {new_driver}")
-                                elif not new_driver and last_driver:
-                                    log_message(f"Carga finalizada. Conductor {last_driver}")
+                        if len(parts) >= 4:
+                            new_driver = parts[1] if parts[1] != "None" else None
+                            try:
+                                new_kwh = float(parts[2])
+                                new_cost = float(parts[3])
 
-                                CURRENT_DRIVER = new_driver
-                                CHARGING_INFO["kwh"] = new_kwh
-                                CHARGING_INFO["cost"] = new_cost
-                                last_driver = new_driver
-                                last_charging_info = {"kwh": new_kwh, "cost": new_cost}
-                        except Exception:
-                            pass
-                    else:
-                        CURRENT_DRIVER = None
-                        CHARGING_INFO = {"kwh": 0, "cost": 0}
-                        last_driver = ""
-                        last_charging_info = {"kwh": 0, "cost": 0}
+                                if (new_driver != last_driver or
+                                        new_kwh != last_charging_info["kwh"] or
+                                        new_cost != last_charging_info["cost"]):
 
-                    if new_status and new_status != CP_STATUS:
-                        log_message(f"Estado: {CP_STATUS} → {new_status}")
-                        CP_STATUS = new_status
-                        try:
-                            central_conn.sendall(f"CHANGE#{cp_id}#None#None#{new_status}".encode())
-                        except Exception:
-                            if RUNNING and gen == RECONNECT_GEN:
-                                RECONNECT_EVENT.set()
+                                    if new_driver and new_driver != last_driver:
+                                        log_message(f"Carga iniciada: conductor {new_driver}")
+                                    elif not new_driver and last_driver:
+                                        log_message(f"Carga finalizada. Conductor {last_driver}")
 
-                    time.sleep(1)
+                                    CURRENT_DRIVER = new_driver
+                                    CHARGING_INFO["kwh"] = new_kwh
+                                    CHARGING_INFO["cost"] = new_cost
+                                    last_driver = new_driver
+                                    last_charging_info = {"kwh": new_kwh, "cost": new_cost}
+                            except Exception:
+                                pass
+                        else:
+                            CURRENT_DRIVER = None
+                            CHARGING_INFO = {"kwh": 0, "cost": 0}
+                            last_driver = ""
+                            last_charging_info = {"kwh": 0, "cost": 0}
 
-                except Exception as e:
-                    log_message(f"Engine caído: {e}")
-                    break
+                        if new_status and new_status != CP_STATUS:
+                            log_message(f"Estado: {CP_STATUS} → {new_status}")
+                            CP_STATUS = new_status
+                            try:
+                                central_conn.sendall(f"CHANGE#{cp_id}#None#None#{new_status}".encode())
+                            except Exception:
+                                if RUNNING and gen == RECONNECT_GEN:
+                                    RECONNECT_EVENT.set()
 
-            # Loop exited via break → Engine crashed (not a clean shutdown or stale gen)
+                        time.sleep(1)
+
+                    except Exception as e:
+                        log_message(f"Engine caído: {e}")
+                        break
+
+                # Bucle interno terminado → Engine caído
+                if RUNNING and gen == RECONNECT_GEN and CP_STATUS != "OUT_OF_ORDER":
+                    log_message("Engine KO → notificando OUT_OF_ORDER a Central")
+                    CP_STATUS = "OUT_OF_ORDER"
+                    try:
+                        central_conn.sendall(f"CHANGE#{cp_id}#None#None#OUT_OF_ORDER".encode())
+                        log_message("OUT_OF_ORDER notificado a Central")
+                    except Exception:
+                        RECONNECT_EVENT.set()
+
+        except Exception as e:
+            # No se pudo conectar al Engine
             if RUNNING and gen == RECONNECT_GEN:
-                log_message("Engine KO → notificando OUT_OF_ORDER a Central")
-                CP_STATUS = "OUT_OF_ORDER"
-                try:
-                    central_conn.sendall(f"CHANGE#{cp_id}#None#None#OUT_OF_ORDER".encode())
-                    log_message("OUT_OF_ORDER notificado a Central")
-                except Exception:
-                    RECONNECT_EVENT.set()
+                if CP_STATUS != "OUT_OF_ORDER":
+                    log_message(f"Engine no disponible: {e}")
+                    CP_STATUS = "OUT_OF_ORDER"
+                    try:
+                        central_conn.sendall(f"CHANGE#{cp_id}#None#None#OUT_OF_ORDER".encode())
+                    except Exception:
+                        RECONNECT_EVENT.set()
 
-    except Exception as e:
-        log_message(f"Error conectando al Engine: {e}")
+        # Esperar antes de reintentar conexión al Engine
+        if RUNNING and gen == RECONNECT_GEN:
+            log_message("Reintentando conexión al Engine en 3s...")
+            time.sleep(3)
+
+
+# Cierra la conexión actual con Central para forzar re-autenticación
+def trigger_reauth():
+    global KEY_REVOKED_FLAG, CENTRAL_CONN
+    KEY_REVOKED_FLAG = False
+    log_message("Re-autenticación iniciada por usuario...")
+    if CENTRAL_CONN:
+        try:
+            CENTRAL_CONN.shutdown(socket.SHUT_RDWR)
+            CENTRAL_CONN.close()
+        except Exception:
+            pass
+    RECONNECT_EVENT.set()
+    print("\n[Monitor] Re-autenticación en curso. Observa el panel para ver el resultado.")
 
 
 # Permite re-registrar el CP manualmente
@@ -410,6 +458,8 @@ def handle_user_input(engine_ip, engine_port):
                 PAUSED = True
                 register_cp_manually()
                 PAUSED = False
+            elif user_input.strip() == "4":
+                trigger_reauth()
             elif user_input.strip() == "0":
                 print(f"\n[Monitor] Cerrando Monitor...")
                 RUNNING = False
@@ -620,7 +670,7 @@ def register_with_registry(registry_url, cp_id, address, price):
 
 # Intenta reconectar con Central cuando la conexión se pierde
 def reconnect_loop(engine_ip, engine_port, central_ip, central_port, cp_id):
-    global RECONNECT_GEN, RUNNING
+    global RECONNECT_GEN, RUNNING, CENTRAL_CONN
 
     while RUNNING:
         if not RECONNECT_EVENT.wait(timeout=1.0):
@@ -635,6 +685,11 @@ def reconnect_loop(engine_ip, engine_port, central_ip, central_port, cp_id):
         while RUNNING:
             try:
                 new_conn = connect_central(central_ip, central_port, cp_id)
+                if new_conn is None:
+                    log_message("Reconexión fallida: autenticación rechazada. Reintentando en 5s...")
+                    time.sleep(5)
+                    continue
+                CENTRAL_CONN = new_conn
                 RECONNECT_GEN += 1
                 gen = RECONNECT_GEN
 
@@ -666,7 +721,14 @@ def main(engine_ip, engine_port, central_ip, central_port, cp_id, registry_ip, r
     registry_url = REGISTRY_URL
 
     print(f"[Monitor] Solicitando configuración a Central para CP: {cp_id}")
-    if not get_config_from_central(central_ip, central_port, cp_id):
+    config_result = get_config_from_central(central_ip, central_port, cp_id)
+
+    if config_result == "unreachable":
+        print(f"[Monitor] Error: no se pudo conectar a Central en {central_ip}:{central_port}.")
+        print(f"[Monitor] Verifica que Central está activa y que la IP/puerto son correctos. Cerrando.")
+        return
+
+    elif config_result == "not_found":
         print(f"\n[Monitor] CP no encontrado en sistema. Iniciando proceso de registro...")
         CP_ADDRESS = input("  Dirección del CP: ").strip()
         CP_PRICE = float(input("  Precio (€/kWh): ").strip())
@@ -685,10 +747,11 @@ def main(engine_ip, engine_port, central_ip, central_port, cp_id, registry_ip, r
         print(f"[Monitor] Esperando 2 segundos para que Registry actualice la BD...")
         time.sleep(2)
 
-        if not get_config_from_central(central_ip, central_port, cp_id):
+        if get_config_from_central(central_ip, central_port, cp_id) != "found":
             print("[Monitor] Error: aún no se puede obtener configuración")
             return
-    else:
+
+    else:  # "found"
         # CP already in Central — load credentials from local file or Registry
         username, password = load_local_credentials(cp_id)
         if not username:
@@ -706,6 +769,27 @@ def main(engine_ip, engine_port, central_ip, central_port, cp_id, registry_ip, r
     
     print(f"[Monitor] Autenticándose con Central...")
     central_conn = connect_central(central_ip, central_port, cp_id)
+    CENTRAL_CONN = central_conn
+
+    if central_conn is None:
+        print(f"[Monitor] Credenciales desincronizadas. Re-registrando CP en Registry...")
+        creds_file = f"creds_{cp_id}.json"
+        try:
+            os.remove(creds_file)
+        except FileNotFoundError:
+            pass
+        success, username, password = register_with_registry(registry_url, cp_id, CP_ADDRESS, CP_PRICE)
+        if not success:
+            print("[Monitor] Error crítico: no se pudo re-registrar en Registry")
+            return
+        CP_USERNAME = username
+        CP_PASSWORD = password
+        print(f"[Monitor] Re-registro completado. Reintentando autenticación...")
+        central_conn = connect_central(central_ip, central_port, cp_id)
+        CENTRAL_CONN = central_conn
+        if central_conn is None:
+            print("[Monitor] Error crítico: autenticación fallida tras re-registro. Cerrando.")
+            return
 
     # Hilo de reconexión automática a Central
     threading.Thread(

@@ -12,7 +12,7 @@ python3 EV_Registry.py
 python3 EV_Central.py
 python3 EV_CP_E.py                                    # Engine ALC1
 python3 EV_CP_M.py                                    # Monitor ALC1
-python3 EV_CP_E.py localhost 9093                     # Engine ALC2 (puerto distinto si misma máquina)
+python3 EV_CP_E.py localhost 9092 6001                # Engine ALC2 (puerto TCP distinto si misma máquina)
 python3 EV_CP_M.py localhost 6001 localhost 5000 ALC2 # Monitor ALC2
 python3 EV_Driver.py localhost 9092 Driver1
 ```

@@ -3,6 +3,7 @@ import socket
 import json
 import threading
 import time
+import queue
 import tkinter as tk
 from kafka import KafkaProducer, KafkaConsumer
 import os
@@ -38,6 +39,11 @@ MENU_REFRESH_EVENT = threading.Event()
 CP_KEYS = {}            # {cp_id: Fernet instance}
 CP_KEYS_LOCK = threading.Lock()
 PENDING_WEATHER_STOP = set()    # CPs that should stop after current charge ends
+COMMAND_RESPONSE_QUEUES = {}    # {cp_id: queue.Queue} for routing STOP_OK/RESUME_OK
+COMMAND_RESPONSE_LOCK = threading.Lock()
+SHARED_PRODUCER = None          # Kafka producer shared across threads
+WEATHER_DATA = {}               # {cp_id: {city, temp, alert, updated}}
+WEATHER_LOCK = threading.Lock()
 
 
 # ---------------------------
@@ -166,58 +172,47 @@ def send_command_to_cp(cp_id, command):
         if cp_id not in ACTIVE_CONNECTIONS:
             log_message(f"Central: CP {cp_id} no está conectado")
             return False
-        
         conn = ACTIVE_CONNECTIONS[cp_id]
-    
+
+    resp_queue = queue.Queue()
+    with COMMAND_RESPONSE_LOCK:
+        COMMAND_RESPONSE_QUEUES[cp_id] = resp_queue
+
     try:
         msg = f"COMMAND#{cp_id}#{command}"
         conn.sendall(msg.encode())
         log_message(f"Central: Comando {command} enviado a {cp_id}")
-        
-        # Esperar confirmación con timeout más largo
+
         try:
-            # Guardar el timeout original
-            original_timeout = conn.gettimeout()
-            conn.settimeout(5)                      # Timeout de 5 segundos
-            
-            response = conn.recv(1024).decode()
+            response = resp_queue.get(timeout=5)
             log_message(f"Central: Respuesta de {cp_id}: {response}")
-            
-            # Restaurar timeout original
-            if original_timeout is not None:
-                conn.settimeout(original_timeout)
-            else:
-                conn.settimeout(None)
-            
-            # Actualizar BD según el comando y la respuesta
+
             if "OK" in response:
                 if command == "STOP":
-                    # Obtener el driver actual antes de cambiar el estado
                     cp = get_charging_point(cp_id)
                     current_driver = cp.get("driver", "") if cp else ""
                     current_kwh = cp.get("kwh_consumed", 0) if cp else 0
                     current_cost = cp.get("money_consumed", 0) if cp else 0
-                    # Cambiar a BROKEN (rojo) y mantener info de carga
                     update_charging_point(cp_id, "BROKEN", current_driver, current_kwh, current_cost)
                     log_message(f"Central: BD actualizada - {cp_id} → BROKEN (Averiado)")
-
                 elif command == "RESUME":
                     update_charging_point(cp_id, "ACTIVE", "")
                     log_message(f"Central: BD actualizada - {cp_id} → ACTIVE")
-
                 return True
-            
             else:
                 log_message(f"Central: Comando no confirmado por {cp_id}")
                 return False
-                
-        except socket.timeout:
+
+        except queue.Empty:
             log_message(f"Central: Timeout esperando respuesta de {cp_id}")
             return False
-            
+
     except Exception as e:
         log_message(f"Central: Error enviando comando a {cp_id}: {e}")
         return False
+    finally:
+        with COMMAND_RESPONSE_LOCK:
+            COMMAND_RESPONSE_QUEUES.pop(cp_id, None)
 
 
 # Para un punto de carga específico
@@ -417,6 +412,14 @@ def control_menu_loop():
                     audit("KEY_REVOKED", "central_menu", f"cp_id={cp_id}")
                     log_message(f"Central: Clave revocada para {cp_id} → OUT_OF_ORDER")
                     print(f"  Clave de {cp_id} revocada. CP puesto en OUT_OF_ORDER.")
+                    with CONNECTIONS_LOCK:
+                        monitor_conn = ACTIVE_CONNECTIONS.get(cp_id)
+                    if monitor_conn:
+                        try:
+                            monitor_conn.sendall(f"KEY_REVOKED#{cp_id}".encode())
+                            log_message(f"Central: Monitor {cp_id} notificado de la revocación")
+                        except Exception as e:
+                            log_message(f"Central: No se pudo notificar revocación a Monitor {cp_id}: {e}")
                 else:
                     print(f"  CP '{cp_id}' no encontrado")
                 input("\n  Presiona ENTER para continuar...")
@@ -439,6 +442,7 @@ def control_menu_loop():
                 input("\n  Presiona ENTER para continuar...")
 
             elif option == "0":
+                notify_drivers_on_shutdown()
                 print(f"\n  Saliendo del menú de control...")
                 break
                 
@@ -838,7 +842,7 @@ def handle_monitor_connection(conn, addr):
             if msg_type == "REQUEST_CONFIG":
                 cp_id = parts[1]
                 cp = get_charging_point(cp_id)
-                
+
                 if cp:
                     response = f"CONFIG_OK#{cp['address']}#{cp['price']}#{cp['status']}"
                     conn.sendall(response.encode())
@@ -846,6 +850,13 @@ def handle_monitor_connection(conn, addr):
                 else:
                     conn.sendall(b"CONFIG_NOT_FOUND")
                     log_message(f"Central: CP {cp_id} no encontrado en BD")
+                continue
+
+            if msg_type in ("STOP_OK", "RESUME_OK", "ERROR"):
+                with COMMAND_RESPONSE_LOCK:
+                    q = COMMAND_RESPONSE_QUEUES.get(cp_id)
+                if q:
+                    q.put(msg_type)
                 continue
 
             if len(parts) < 5:
@@ -917,6 +928,24 @@ def handle_monitor_connection(conn, addr):
                     if cp["status"] == "BUSY" and cp_status == "ACTIVE":
                         continue
 
+                    # Engine died during a charge → send partial ticket to Driver
+                    if cp["status"] == "BUSY" and cp_status == "OUT_OF_ORDER":
+                        driver_id = cp.get("driver", "")
+                        kwh = cp.get("kwh_consumed", 0)
+                        cost = cp.get("money_consumed", 0)
+                        if driver_id and SHARED_PRODUCER:
+                            ticket = f"CHARGE_INTERRUPTED#{driver_id}#{cp_id}#{kwh:.2f}#{cost:.2f}#avería del CP"
+                            SHARED_PRODUCER.send("respuestas_central", ticket)
+                            SHARED_PRODUCER.flush()
+                            log_message(f"Central: Ticket parcial enviado a {driver_id} — {kwh:.2f} kWh, {cost:.2f}€")
+                            audit("CHARGE_INTERRUPTED", cp_id, f"driver={driver_id} kwh={kwh:.2f} cost={cost:.2f}")
+                        with CHARGING_START_LOCK:
+                            CHARGING_START_TIMES.pop(cp_id, None)
+                        # Reset driver info so the CP can accept new charges once it recovers
+                        update_charging_point(cp_id, cp_status, "", 0, 0)
+                        log_message(f"Central: Estado actualizado {cp_id} -> {cp_status}")
+                        continue
+
                     current_driver = cp.get("driver", "")
                     current_kwh = cp.get("kwh_consumed", 0)
                     current_cost = cp.get("money_consumed", 0)
@@ -970,10 +999,36 @@ def main(central_port):
                     log_message(f"Central: Error aceptando conexión: {e}")
 
 
+# Avisa a los drivers con carga activa que Central se cierra (la carga continúa en el Engine)
+def notify_drivers_on_shutdown():
+    if not SHARED_PRODUCER:
+        return
+    cps = list_charging_points()
+    busy = [cp for cp in cps if cp.get("status") == "BUSY" and cp.get("driver")]
+    if not busy:
+        return
+    print(f"\n[Central] Avisando a {len(busy)} conductor(es) activo(s) de la caída...")
+    for cp in busy:
+        driver_id = cp.get("driver", "")
+        cp_id = cp.get("id", "")
+        if driver_id:
+            msg = f"CENTRAL_DOWN#{driver_id}#{cp_id}"
+            try:
+                SHARED_PRODUCER.send("respuestas_central", msg)
+            except Exception as e:
+                print(f"[Central] Error avisando a {driver_id}: {e}")
+    try:
+        SHARED_PRODUCER.flush()
+        print("[Central] Avisos enviados.")
+    except Exception:
+        pass
+
+
 # Manejador de señal para Ctrl+C
 def signal_handler(sig, frame):
     global SHUTDOWN_FLAG
     print("\n[Central] Señal de interrupción recibida. Cerrando sistema...")
+    notify_drivers_on_shutdown()
     SHUTDOWN_FLAG = True
 
 
@@ -1027,6 +1082,30 @@ def weather_alert():
         return jsonify({"status": "ERROR", "message": str(e)}), 500
     
 
+# POST /weather/data — EV_W empuja lecturas de temperatura
+@app.route('/weather/data', methods=['POST'])
+def receive_weather_data():
+    try:
+        data = request.json
+        cp_id = data.get("cp_id")
+        city  = data.get("city")
+        temp  = data.get("temp")
+        alert = data.get("alert", False)
+        if cp_id and city is not None and temp is not None:
+            with WEATHER_LOCK:
+                WEATHER_DATA[cp_id] = {
+                    "city":    city,
+                    "temp":    round(temp, 1),
+                    "alert":   bool(alert),
+                    "updated": time.strftime("%H:%M:%S"),
+                    "ts":      time.time()
+                }
+            return jsonify({"status": "SUCCESS"}), 200
+        return jsonify({"status": "ERROR", "message": "Datos incompletos"}), 400
+    except Exception as e:
+        return jsonify({"status": "ERROR", "message": str(e)}), 500
+
+
 # GET /api/charging_points
 # Devuelve todos los puntos de carga con su estado actual
 @app.route('/api/charging_points', methods=['GET'])
@@ -1074,22 +1153,50 @@ def get_charging_point_detail(cp_id):
         return jsonify({"status": "ERROR", "message": str(e)}), 500
 
 
-# GET /api/drivers
-# Devuelve todos los conductores registrados
+# GET /api/active_drivers
+# Devuelve los conductores con carga activa en este momento
+@app.route('/api/active_drivers', methods=['GET'])
+def get_active_drivers():
+    try:
+        cps = list_charging_points()
+        busy = [cp for cp in cps if cp.get("status") == "BUSY" and cp.get("driver")]
+        with CHARGING_START_LOCK:
+            start_times = dict(CHARGING_START_TIMES)
+        result = [
+            {
+                "driver_id":  cp["driver"],
+                "cp_id":      cp["id"],
+                "start_time": start_times.get(cp["id"], "--:--:--"),
+                "kwh":        cp.get("kwh_consumed", 0),
+                "cost":       cp.get("money_consumed", 0)
+            }
+            for cp in busy
+        ]
+        return jsonify({"status": "SUCCESS", "data": result, "count": len(result)}), 200
+    except Exception as e:
+        return jsonify({"status": "ERROR", "message": str(e)}), 500
+
+
+# GET /api/weather
+# Devuelve el último dato de temperatura por CP (publicado por EV_W)
+@app.route('/api/weather', methods=['GET'])
+def get_weather():
+    try:
+        with WEATHER_LOCK:
+            data = dict(WEATHER_DATA)
+        return jsonify({"status": "SUCCESS", "data": data}), 200
+    except Exception as e:
+        return jsonify({"status": "ERROR", "message": str(e)}), 500
+
+
+# GET /api/drivers (legacy — kept for compatibility)
 @app.route('/api/drivers', methods=['GET'])
 def get_all_drivers():
     try:
         db = load_db()
         drivers = db.get("drivers", [])
-        
-        return jsonify({
-            "status": "SUCCESS",
-            "data": drivers,
-            "count": len(drivers)
-        }), 200
-        
+        return jsonify({"status": "SUCCESS", "data": drivers, "count": len(drivers)}), 200
     except Exception as e:
-        log_message(f"Central API: Error obteniendo drivers: {e}")
         return jsonify({"status": "ERROR", "message": str(e)}), 500
 
 
@@ -1178,8 +1285,13 @@ def run_api_server(port=8000):
 if __name__ == "__main__":
     # Configurar manejador de señales
     signal.signal(signal.SIGINT, signal_handler)
-    
+
     central_port, broker_ip, broker_port = args()
+
+    SHARED_PRODUCER = KafkaProducer(
+        bootstrap_servers=f"{broker_ip}:{broker_port}",
+        value_serializer=lambda v: v.encode("utf-8")
+    )
 
     audit("SYSTEM_START", "central", f"port={central_port} broker={broker_ip}:{broker_port}")
     reset_charging_points()

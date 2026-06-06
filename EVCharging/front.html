@@ -3,262 +3,493 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>EV Charging - Panel</title>
+    <title>EV Charging Network — Panel de Control</title>
     <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+
         body {
-            font-family: Arial, sans-serif;
-            margin: 20px;
-            background: #f5f5f5;
+            font-family: 'Segoe UI', Arial, sans-serif;
+            background: #0d1117;
+            color: #c9d1d9;
+            min-height: 100vh;
         }
-        
-        h1 {
-            color: #333;
+
+        header {
+            background: #161b22;
+            border-bottom: 1px solid #30363d;
+            padding: 14px 24px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            flex-wrap: wrap;
+            gap: 8px;
         }
-        
-        .status {
-            background: white;
-            padding: 15px;
-            margin-bottom: 20px;
-            border-radius: 5px;
-            border-left: 4px solid #007bff;
+
+        header h1 {
+            font-size: 18px;
+            color: #58a6ff;
+            font-weight: 600;
         }
-        
-        .status span {
-            margin-right: 20px;
+
+        .header-right {
+            display: flex;
+            align-items: center;
+            gap: 16px;
+            font-size: 12px;
+            color: #8b949e;
         }
-        
-        table {
-            width: 100%;
-            background: white;
-            border-collapse: collapse;
-            margin-bottom: 20px;
-            border-radius: 5px;
+
+        .api-url {
+            font-family: monospace;
+            font-size: 11px;
+            color: #484f58;
+        }
+
+        .dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 4px; }
+        .dot-green { background: #3fb950; }
+        .dot-red   { background: #f85149; }
+        .dot-gray  { background: #484f58; }
+
+        .main { padding: 20px 24px; display: flex; flex-direction: column; gap: 20px; }
+
+        /* Summary bar */
+        .summary {
+            background: #161b22;
+            border: 1px solid #30363d;
+            border-radius: 8px;
+            padding: 14px 20px;
+            display: flex;
+            gap: 32px;
+            flex-wrap: wrap;
+        }
+
+        .summary-item { text-align: center; }
+        .summary-item .val { font-size: 28px; font-weight: 700; color: #c9d1d9; }
+        .summary-item .lbl { font-size: 11px; color: #8b949e; text-transform: uppercase; letter-spacing: 1px; }
+        .summary-item.active .val { color: #3fb950; }
+        .summary-item.busy   .val { color: #58a6ff; }
+        .summary-item.warn   .val { color: #d29922; }
+
+        /* Sections */
+        section {
+            background: #161b22;
+            border: 1px solid #30363d;
+            border-radius: 8px;
             overflow: hidden;
         }
-        
+
+        .section-header {
+            background: #1c2128;
+            border-bottom: 1px solid #30363d;
+            padding: 10px 16px;
+            font-size: 11px;
+            font-weight: 700;
+            color: #8b949e;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+        }
+
+        /* Tables */
+        table { width: 100%; border-collapse: collapse; font-size: 13px; }
+
         th {
-            background: #007bff;
-            color: white;
-            padding: 12px;
+            background: #1c2128;
+            color: #8b949e;
+            font-weight: 600;
+            font-size: 11px;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            padding: 10px 14px;
             text-align: left;
+            border-bottom: 1px solid #30363d;
         }
-        
+
         td {
-            padding: 12px;
-            border-bottom: 1px solid #ddd;
+            padding: 10px 14px;
+            border-bottom: 1px solid #21262d;
+            vertical-align: middle;
         }
-        
-        tr:hover {
-            background: #f8f9fa;
-        }
-        
-        .badge {
-            padding: 4px 8px;
-            border-radius: 3px;
-            font-size: 12px;
-            font-weight: bold;
-        }
-        
-        .badge-active { background: #28a745; color: white; }
-        .badge-busy { background: #007bff; color: white; }
-        .badge-out { background: #ffc107; color: black; }
-        .badge-broken { background: #dc3545; color: white; }
-        .badge-inactive { background: #6c757d; color: white; }
-        
-        .dot {
-            display: inline-block;
-            width: 8px;
-            height: 8px;
-            border-radius: 50%;
-            margin-right: 5px;
-        }
-        
-        .dot-green { background: #28a745; }
-        .dot-red { background: #dc3545; }
-        
-        .messages {
-            background: white;
-            padding: 15px;
-            border-radius: 5px;
-            max-height: 300px;
-            overflow-y: auto;
-        }
-        
-        .messages h3 {
-            margin-top: 0;
-            color: #333;
-        }
-        
-        .message {
-            padding: 5px;
-            font-size: 13px;
-            color: #666;
-            border-bottom: 1px solid #eee;
-        }
-        
-        .error {
-            background: #dc3545;
-            color: white;
-            padding: 10px;
-            margin-bottom: 20px;
-            border-radius: 5px;
-        }
-        
-        .footer {
+
+        tr:last-child td { border-bottom: none; }
+        tr:hover td { background: #1c2128; }
+
+        .empty-row td {
             text-align: center;
-            color: #999;
-            margin-top: 20px;
-            font-size: 14px;
+            color: #484f58;
+            padding: 20px;
+            font-style: italic;
+        }
+
+        /* Badges */
+        .badge {
+            display: inline-block;
+            padding: 3px 8px;
+            border-radius: 4px;
+            font-size: 11px;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+
+        .badge-active   { background: #1a3a1a; color: #3fb950; border: 1px solid #2ea043; }
+        .badge-busy     { background: #0d2a4a; color: #58a6ff; border: 1px solid #1f6feb; }
+        .badge-out      { background: #3a2200; color: #d29922; border: 1px solid #9e6a03; }
+        .badge-broken   { background: #3a0d0d; color: #f85149; border: 1px solid #da3633; }
+        .badge-inactive { background: #1c2128; color: #484f58; border: 1px solid #30363d; }
+
+        /* Temperature badges */
+        .temp-ok    { color: #3fb950; font-weight: 600; }
+        .temp-alert { color: #f85149; font-weight: 700; }
+        .temp-na    { color: #484f58; }
+
+        .alert-icon { color: #f85149; margin-right: 4px; }
+
+        /* Messages */
+        .messages-box {
+            height: 200px;
+            overflow-y: auto;
+            padding: 10px 16px;
+            font-family: 'Consolas', monospace;
+            font-size: 12px;
+        }
+
+        .msg-line { padding: 2px 0; border-bottom: 1px solid #21262d; }
+        .msg-ts   { color: #484f58; margin-right: 6px; }
+        .msg-ok   { color: #3fb950; }
+        .msg-warn { color: #d29922; }
+        .msg-err  { color: #f85149; }
+        .msg-info { color: #8b949e; }
+
+        /* Error banner */
+        #error-banner {
+            background: #3a0d0d;
+            border: 1px solid #da3633;
+            border-radius: 8px;
+            padding: 12px 16px;
+            color: #f85149;
+            font-size: 13px;
+            display: none;
+        }
+
+        /* Scrollbar */
+        ::-webkit-scrollbar { width: 6px; height: 6px; }
+        ::-webkit-scrollbar-track { background: #161b22; }
+        ::-webkit-scrollbar-thumb { background: #30363d; border-radius: 3px; }
+
+        footer {
+            text-align: center;
+            color: #484f58;
+            font-size: 11px;
+            padding: 16px;
         }
     </style>
 </head>
 <body>
-    <h1>EV Charging - Panel de Control</h1>
-    
-    <div id="error"></div>
-    
-    <div class="status">
-        <span><strong>Total:</strong> <span id="total">-</span></span>
-        <span><strong>Conectados:</strong> <span id="connected">-</span></span>
-        <span><strong>Activos:</strong> <span id="active">-</span></span>
-        <span><strong>Cargando:</strong> <span id="busy">-</span></span>
-        <span><strong>Actualizado:</strong> <span id="time">-</span></span>
+
+<header>
+    <h1>EV Charging Network &mdash; Panel de Control</h1>
+    <div class="header-right">
+        <span id="conn-status"><span class="dot dot-gray"></span>Conectando...</span>
+        <span>Actualizado: <span id="last-update">--:--:--</span></span>
+        <span class="api-url" id="api-display"></span>
     </div>
-    
-    <table>
-        <thead>
-            <tr>
-                <th>ID</th>
-                <th>Dirección</th>
-                <th>Precio</th>
-                <th>Estado</th>
-                <th>Conductor</th>
-                <th>Consumo</th>
-                <th>Importe</th>
-                <th>Conexión</th>
-            </tr>
-        </thead>
-        <tbody id="cpTable">
-            <tr>
-                <td colspan="8" style="text-align:center;">Cargando datos...</td>
-            </tr>
-        </tbody>
-    </table>
-    
-    <div class="messages">
-        <h3>Mensajes del Sistema</h3>
-        <div id="messages">
-            <div class="message">Esperando mensajes...</div>
+</header>
+
+<div class="main">
+
+    <div id="error-banner"></div>
+
+    <!-- Summary -->
+    <div class="summary">
+        <div class="summary-item">
+            <div class="val" id="s-total">-</div>
+            <div class="lbl">Total CPs</div>
+        </div>
+        <div class="summary-item">
+            <div class="val" id="s-conn">-</div>
+            <div class="lbl">Conectados</div>
+        </div>
+        <div class="summary-item active">
+            <div class="val" id="s-active">-</div>
+            <div class="lbl">Disponibles</div>
+        </div>
+        <div class="summary-item busy">
+            <div class="val" id="s-busy">-</div>
+            <div class="lbl">Cargando</div>
+        </div>
+        <div class="summary-item warn">
+            <div class="val" id="s-out">-</div>
+            <div class="lbl">Fuera de servicio</div>
         </div>
     </div>
-    
-    <div class="footer">
-        Actualización automática cada 2 segundos
-    </div>
 
-    <script>
-        const API = 'http://localhost:8000/api';
+    <!-- Charging Points -->
+    <section>
+        <div class="section-header">Charging Points</div>
+        <table>
+            <thead>
+                <tr>
+                    <th>ID</th>
+                    <th>Dirección</th>
+                    <th>Precio</th>
+                    <th>Estado</th>
+                    <th>Conductor</th>
+                    <th>kWh</th>
+                    <th>Coste</th>
+                    <th>Conexión</th>
+                    <th>Ciudad</th>
+                    <th>Temperatura</th>
+                </tr>
+            </thead>
+            <tbody id="cp-table">
+                <tr class="empty-row"><td colspan="10">Cargando datos...</td></tr>
+            </tbody>
+        </table>
+    </section>
 
-        function getStatusBadge(status) {
-            const map = {
-                'ACTIVE': ['Disponible', 'badge-active'],
-                'BUSY': ['Cargando', 'badge-busy'],
-                'OUT_OF_ORDER': ['Fuera de Servicio', 'badge-out'],
-                'BROKEN': ['Averiado', 'badge-broken'],
-                'INACTIVE': ['Inactivo', 'badge-inactive']
-            };
-            const [text, cls] = map[status] || [status, 'badge-inactive'];
-            return `<span class="badge ${cls}">${text}</span>`;
+    <!-- Active Drivers -->
+    <section>
+        <div class="section-header">On Going Drivers Requests</div>
+        <table>
+            <thead>
+                <tr>
+                    <th>Conductor</th>
+                    <th>Punto de carga</th>
+                    <th>Inicio</th>
+                    <th>kWh</th>
+                    <th>Coste</th>
+                </tr>
+            </thead>
+            <tbody id="drivers-table">
+                <tr class="empty-row"><td colspan="5">Sin cargas activas</td></tr>
+            </tbody>
+        </table>
+    </section>
+
+    <!-- Weather -->
+    <section>
+        <div class="section-header">Weather / Climate Status</div>
+        <table>
+            <thead>
+                <tr>
+                    <th>CP</th>
+                    <th>Ciudad</th>
+                    <th>Temperatura</th>
+                    <th>Estado climático</th>
+                    <th>Actualizado</th>
+                </tr>
+            </thead>
+            <tbody id="weather-table">
+                <tr class="empty-row"><td colspan="5">Sin datos de EV_W — arranca EV_W para ver temperatura</td></tr>
+            </tbody>
+        </table>
+    </section>
+
+    <!-- Messages -->
+    <section>
+        <div class="section-header">Application Messages</div>
+        <div class="messages-box" id="messages-box">
+            <div class="msg-line"><span class="msg-ts">--:--:--</span><span class="msg-info">Esperando mensajes...</span></div>
+        </div>
+    </section>
+
+</div>
+
+<footer>Actualización automática cada 2 segundos &mdash; <span id="footer-api"></span></footer>
+
+<script>
+    // ── Configuración de la URL de la API ──────────────────────────────────
+    // Uso: front.html?api=http://192.168.1.10:8000
+    const urlParams = new URLSearchParams(window.location.search);
+    const BASE_URL  = (urlParams.get('api') || 'http://localhost:8000').replace(/\/$/, '');
+    const API       = BASE_URL + '/api';
+
+    document.getElementById('api-display').textContent = BASE_URL;
+    document.getElementById('footer-api').textContent  = BASE_URL;
+
+    // ── Helpers ────────────────────────────────────────────────────────────
+    function statusBadge(status, connected) {
+        if (!connected) return '<span class="badge badge-inactive">Desconectado</span>';
+        const map = {
+            ACTIVE:       ['Disponible',     'badge-active'],
+            BUSY:         ['Cargando',        'badge-busy'],
+            OUT_OF_ORDER: ['Fuera Servicio',  'badge-out'],
+            BROKEN:       ['Averiado',        'badge-broken'],
+            INACTIVE:     ['Inactivo',        'badge-inactive'],
+        };
+        const [txt, cls] = map[status] || [status, 'badge-inactive'];
+        return `<span class="badge ${cls}">${txt}</span>`;
+    }
+
+    function connDot(connected) {
+        return connected
+            ? '<span class="dot dot-green"></span>Online'
+            : '<span class="dot dot-red"></span>Offline';
+    }
+
+    function isStale(w) {
+        if (!w || !w.ts) return true;
+        return (Date.now() / 1000 - w.ts) > 8;
+    }
+
+    function tempCell(weather) {
+        if (!weather) return '<span class="temp-na">—</span>';
+        if (weather.alert) {
+            return `<span class="temp-alert">&#x26A0; ${weather.temp}°C</span>`;
+        }
+        return `<span class="temp-ok">${weather.temp}°C</span>`;
+    }
+
+    function showError(msg) {
+        const b = document.getElementById('error-banner');
+        b.style.display = 'block';
+        b.textContent   = '⚠ ' + msg;
+        clearTimeout(showError._timer);
+        showError._timer = setTimeout(() => { b.style.display = 'none'; }, 8000);
+    }
+
+    function setConnStatus(ok) {
+        const el = document.getElementById('conn-status');
+        el.innerHTML = ok
+            ? '<span class="dot dot-green"></span>Central conectada'
+            : '<span class="dot dot-red"></span>Central no disponible';
+    }
+
+    // ── Fetches ────────────────────────────────────────────────────────────
+    async function loadCPs(weather) {
+        const res  = await fetch(`${API}/charging_points`);
+        const data = await res.json();
+        const tbody = document.getElementById('cp-table');
+
+        if (!data.data || data.data.length === 0) {
+            tbody.innerHTML = '<tr class="empty-row"><td colspan="10">No hay puntos de carga registrados</td></tr>';
+            return;
         }
 
-        async function loadCPs() {
-            try {
-                const res = await fetch(`${API}/charging_points`);
-                const data = await res.json();
-                
-                if (data.status === 'SUCCESS') {
-                    const tbody = document.getElementById('cpTable');
-                    
-                    if (data.data.length === 0) {
-                        tbody.innerHTML = '<tr><td colspan="8" style="text-align:center;">No hay puntos de carga</td></tr>';
-                        return;
-                    }
-                    
-                    tbody.innerHTML = data.data.map(cp => `
-                        <tr>
-                            <td><strong>${cp.id}</strong></td>
-                            <td>${cp.address}</td>
-                            <td>${cp.price} €/kWh</td>
-                            <td>${getStatusBadge(cp.status)}</td>
-                            <td>${cp.driver || '-'}</td>
-                            <td>${cp.kwh_consumed || 0} kWh</td>
-                            <td>${cp.money_consumed || 0} €</td>
-                            <td>
-                                <span class="dot ${cp.connected ? 'dot-green' : 'dot-red'}"></span>
-                                ${cp.connected ? 'Online' : 'Offline'}
-                            </td>
-                        </tr>
-                    `).join('');
-                }
-            } catch (error) {
-                showError('Error cargando puntos de carga: ' + error.message);
+        tbody.innerHTML = data.data.map(cp => {
+            const w    = weather[cp.id];
+            const city = w ? w.city : '—';
+            return `<tr>
+                <td><strong>${cp.id}</strong></td>
+                <td>${cp.address}</td>
+                <td>${Number(cp.price).toFixed(2)} €/kWh</td>
+                <td>${statusBadge(cp.status, cp.connected)}</td>
+                <td>${cp.driver || '—'}</td>
+                <td>${Number(cp.kwh_consumed || 0).toFixed(2)}</td>
+                <td>${Number(cp.money_consumed || 0).toFixed(2)} €</td>
+                <td>${connDot(cp.connected)}</td>
+                <td>${city}</td>
+                <td>${tempCell(w)}</td>
+            </tr>`;
+        }).join('');
+    }
+
+    async function loadDrivers() {
+        const res  = await fetch(`${API}/active_drivers`);
+        const data = await res.json();
+        const tbody = document.getElementById('drivers-table');
+
+        if (!data.data || data.data.length === 0) {
+            tbody.innerHTML = '<tr class="empty-row"><td colspan="5">Sin cargas activas</td></tr>';
+            return;
+        }
+
+        tbody.innerHTML = data.data.map(d => `<tr>
+            <td><strong>${d.driver_id}</strong></td>
+            <td>${d.cp_id}</td>
+            <td>${d.start_time}</td>
+            <td>${Number(d.kwh).toFixed(2)} kWh</td>
+            <td>${Number(d.cost).toFixed(2)} €</td>
+        </tr>`).join('');
+    }
+
+    async function loadWeather() {
+        const res  = await fetch(`${API}/weather`);
+        const data = await res.json();
+        const tbody = document.getElementById('weather-table');
+        const wd    = data.data || {};
+
+        // Descartar entradas con más de 8s de antigüedad (EV_W parado)
+        const fresh = {};
+        for (const [cp_id, w] of Object.entries(wd)) {
+            if (!isStale(w)) fresh[cp_id] = w;
+        }
+
+        if (Object.keys(fresh).length === 0) {
+            tbody.innerHTML = '<tr class="empty-row"><td colspan="5">Sin datos de EV_W — arranca EV_W para ver temperatura</td></tr>';
+            return {};
+        }
+
+        tbody.innerHTML = Object.entries(fresh).map(([cp_id, w]) => {
+            const alertBadge = w.alert
+                ? '<span class="badge badge-broken">ALERTA CLIMATICA</span>'
+                : '<span class="badge badge-active">OK</span>';
+            return `<tr>
+                <td><strong>${cp_id}</strong></td>
+                <td>${w.city}</td>
+                <td>${tempCell(w)}</td>
+                <td>${alertBadge}</td>
+                <td>${w.updated}</td>
+            </tr>`;
+        }).join('');
+
+        return fresh;
+    }
+
+    async function loadStatus() {
+        const res  = await fetch(`${API}/system/status`);
+        const data = await res.json();
+        if (data.status !== 'SUCCESS') return;
+        const s = data.data;
+        document.getElementById('s-total').textContent  = s.total_cps;
+        document.getElementById('s-conn').textContent   = s.connected_cps;
+        document.getElementById('s-active').textContent = s.status_breakdown.ACTIVE || 0;
+        document.getElementById('s-busy').textContent   = s.status_breakdown.BUSY   || 0;
+        const out = (s.status_breakdown.OUT_OF_ORDER || 0) + (s.status_breakdown.BROKEN || 0);
+        document.getElementById('s-out').textContent    = out;
+    }
+
+    async function loadMessages() {
+        const res  = await fetch(`${API}/messages`);
+        const data = await res.json();
+        if (!data.data || data.data.length === 0) return;
+
+        const box = document.getElementById('messages-box');
+        box.innerHTML = data.data.slice(-30).reverse().map(m => {
+            let ts = '', rest = m;
+            if (m.startsWith('[') && m.includes(']')) {
+                const i = m.indexOf(']') + 1;
+                ts = m.slice(0, i); rest = m.slice(i);
             }
+            const low = rest.toLowerCase();
+            let cls = 'msg-info';
+            if (/(error|rechazad|fallo|broken|fail)/.test(low))        cls = 'msg-err';
+            else if (/(alerta|avería|out_of_order|interrumpid|clave revocada)/.test(low)) cls = 'msg-warn';
+            else if (/(autenticado|aceptad|active|reanud| ok|reconectado)/.test(low))     cls = 'msg-ok';
+            return `<div class="msg-line"><span class="msg-ts">${ts}</span><span class="${cls}">${rest}</span></div>`;
+        }).join('');
+    }
+
+    // ── Main update loop ───────────────────────────────────────────────────
+    async function update() {
+        try {
+            const weather = await loadWeather();
+            await Promise.all([
+                loadCPs(weather),
+                loadDrivers(),
+                loadStatus(),
+                loadMessages(),
+            ]);
+            setConnStatus(true);
+            document.getElementById('last-update').textContent = new Date().toLocaleTimeString();
+        } catch (err) {
+            setConnStatus(false);
+            showError(`No se puede conectar con Central (${BASE_URL}). Reintentando...`);
         }
+    }
 
-        async function loadStatus() {
-            try {
-                const res = await fetch(`${API}/system/status`);
-                const data = await res.json();
-                
-                if (data.status === 'SUCCESS') {
-                    const s = data.data;
-                    document.getElementById('total').textContent = s.total_cps;
-                    document.getElementById('connected').textContent = s.connected_cps;
-                    document.getElementById('active').textContent = s.status_breakdown.ACTIVE;
-                    document.getElementById('busy').textContent = s.status_breakdown.BUSY;
-                    document.getElementById('time').textContent = new Date().toLocaleTimeString();
-                }
-            } catch (error) {
-                console.error('Error cargando estado:', error);
-            }
-        }
-
-        async function loadMessages() {
-            try {
-                const res = await fetch(`${API}/messages`);
-                const data = await res.json();
-                
-                if (data.status === 'SUCCESS' && data.data.length > 0) {
-                    const container = document.getElementById('messages');
-                    const last10 = data.data.slice(-10).reverse();
-                    container.innerHTML = last10.map(msg => 
-                        `<div class="message">${msg}</div>`
-                    ).join('');
-                }
-            } catch (error) {
-                console.error('Error cargando mensajes:', error);
-            }
-        }
-
-        function showError(msg) {
-            const error = document.getElementById('error');
-            error.innerHTML = `<div class="error"> ${msg}</div>`;
-            setTimeout(() => error.innerHTML = '', 5000);
-        }
-
-        async function update() {
-            await Promise.all([loadCPs(), loadStatus(), loadMessages()]);
-        }
-
-        // Verificar conexión inicial
-        fetch(`${API}/health`)
-            .then(res => res.json())
-            .then(data => console.log('Conectado:', data.message))
-            .catch(() => showError('No se puede conectar con el API Central'));
-
-        // Actualizar cada 2 segundos
-        update();
-        setInterval(update, 2000);
-    </script>
+    update();
+    setInterval(update, 2000);
+</script>
 </body>
 </html>

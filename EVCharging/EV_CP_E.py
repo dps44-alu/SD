@@ -22,6 +22,7 @@ STOP_CHARGE = False
 MANUALLY_STOPPED = False
 CHARGE_LOCK = threading.Lock()
 FERNET = None
+LAST_CHARGE_END = None
 
 ENGINE_MESSAGES = []
 ENGINE_MESSAGES_LOCK = threading.Lock()
@@ -82,7 +83,8 @@ def display_engine_screen():
 def args():
     broker_ip   = sys.argv[1] if len(sys.argv) > 1 else 'localhost'
     broker_port = int(sys.argv[2]) if len(sys.argv) > 2 else 9092
-    return broker_ip, broker_port
+    engine_port = int(sys.argv[3]) if len(sys.argv) > 3 else 6000
+    return broker_ip, broker_port, engine_port
 
 
 def kafka_send(producer, topic, message):
@@ -116,12 +118,13 @@ def listen_keyboard():
 
 
 def handle_charging(producer, driver_id, cp_id, duration):
-    global CHARGING_ACTIVE, CP_STATUS, CP_PRICE, CURRENT_DRIVER, CURRENT_KWH, CURRENT_COST, STOP_CHARGE, MANUALLY_STOPPED
-    
+    global CHARGING_ACTIVE, CP_STATUS, CP_PRICE, CURRENT_DRIVER, CURRENT_KWH, CURRENT_COST, STOP_CHARGE, MANUALLY_STOPPED, LAST_CHARGE_END
+
     with CHARGE_LOCK:
         CHARGING_ACTIVE = True
         CURRENT_DRIVER = driver_id
-        STOP_CHARGE = False             # Resetear flag al inicio
+        STOP_CHARGE = False
+        LAST_CHARGE_END = None          # Nueva carga: descartar CHARGE_END anterior
     
     total_kwh = 0
     total_cost = 0
@@ -192,10 +195,11 @@ def handle_charging(producer, driver_id, cp_id, duration):
         engine_log(f"Carga finalizada. Total: {total_kwh:.2f} kWh | {total_cost:.2f}€")
     
     kafka_send(producer, "consumo_cps", end_msg)
+    LAST_CHARGE_END = end_msg          # Guardar por si Central reinicia y necesita re-recibirlo
 
 
 def handle_monitor(conn, addr, producer):
-    global CP_ID, CP_PRICE, CP_ADDRESS, CP_STATUS, CONFIG_RECEIVED, CURRENT_DRIVER, CURRENT_KWH, CURRENT_COST, STOP_CHARGE, CHARGING_ACTIVE, MANUALLY_STOPPED, FERNET
+    global CP_ID, CP_PRICE, CP_ADDRESS, CP_STATUS, CONFIG_RECEIVED, CURRENT_DRIVER, CURRENT_KWH, CURRENT_COST, STOP_CHARGE, CHARGING_ACTIVE, MANUALLY_STOPPED, FERNET, LAST_CHARGE_END
     last_status = ""
 
     while True:
@@ -237,6 +241,12 @@ def handle_monitor(conn, addr, producer):
                 CONFIG_RECEIVED = True
                 engine_log(f"Config recibida: {CP_ID} | {CP_ADDRESS} | {CP_PRICE}€/kWh")
                 conn.sendall(b"CONFIG_OK")
+
+                # Si Central reinició durante una carga y perdió el CHARGE_END,
+                # reenviarlo con la nueva clave para que el Driver reciba su ticket
+                if LAST_CHARGE_END:
+                    engine_log("Re-enviando CHARGE_END con nueva clave (recuperación)")
+                    kafka_send(producer, "consumo_cps", LAST_CHARGE_END)
 
             elif msg_type == "MANUAL_CHARGE":
                 cp_id = parts[1]
@@ -302,11 +312,17 @@ def listen_charge_requests(producer, broker_ip, broker_port):
         time.sleep(0.5)
 
     consumer = KafkaConsumer(
-        "peticiones_carga",
         bootstrap_servers=f"{broker_ip}:{broker_port}",
         value_deserializer=lambda v: v.decode("utf-8"),
-        group_id=f"engine-{CP_ID}"
+        group_id=f"engine-{CP_ID}",
+        auto_offset_reset='latest'
     )
+    consumer.subscribe(["peticiones_carga"])
+
+    # Descartar mensajes anteriores al arranque (ej. START_CHARGE de sesión anterior)
+    while not consumer.assignment():
+        consumer.poll(timeout_ms=100)
+    consumer.seek_to_end()
 
     engine_log(f"Escuchando peticiones de carga para {CP_ID}")
 
@@ -339,7 +355,7 @@ def listen_charge_requests(producer, broker_ip, broker_port):
                     engine_log("Petición rechazada: CP no disponible o ya en uso")
 
 
-def main(broker_ip, broker_port):
+def main(broker_ip, broker_port, engine_port):
     producer = KafkaProducer(
         bootstrap_servers=f"{broker_ip}:{broker_port}",
         value_serializer=lambda v: v.encode("utf-8")
@@ -348,17 +364,17 @@ def main(broker_ip, broker_port):
     threading.Thread(target=listen_keyboard, daemon=True).start()
     threading.Thread(target=display_engine_screen, daemon=True).start()
 
-    engine_log(f"Iniciado. Escuchando en {ENGINE_IP}:{ENGINE_PORT} | Estado: {CP_STATUS}")
-    
+    engine_log(f"Iniciado. Escuchando en {ENGINE_IP}:{engine_port} | Estado: {CP_STATUS}")
+
     threading.Thread(
-        target=listen_charge_requests, 
-        args=(producer, broker_ip, broker_port), 
+        target=listen_charge_requests,
+        args=(producer, broker_ip, broker_port),
         daemon=True
     ).start()
 
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as server:
         server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-        server.bind((ENGINE_IP, ENGINE_PORT))
+        server.bind((ENGINE_IP, engine_port))
         server.listen()
 
         while True:
@@ -371,5 +387,5 @@ def main(broker_ip, broker_port):
 
 
 if __name__ == "__main__":
-    broker_ip, broker_port = args()
-    main(broker_ip, broker_port)
+    broker_ip, broker_port, engine_port = args()
+    main(broker_ip, broker_port, engine_port)

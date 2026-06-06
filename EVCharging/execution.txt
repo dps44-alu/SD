@@ -1,5 +1,5 @@
 ============================================================
-  EVCharging Network - Guía de ejecución
+  EVCharging Network - Guía de ejecución (Release 2)
 ============================================================
 
 REQUISITOS PREVIOS
@@ -11,7 +11,7 @@ pip3 install flask flask-cors kafka-python requests cryptography --break-system-
 openssl req -x509 -newkey rsa:4096 -nodes -out cert.pem -keyout key.pem -days 365 -subj "/CN=localhost"
 
 # Limpiar datos anteriores (opcional, para empezar desde cero)
-rm -f db.json credentials.json audit.log creds_*.json
+rm -f db.json credentials.json audit.log creds_*.json ev_w_config.json
 
 
 ============================================================
@@ -25,24 +25,50 @@ rm -f db.json credentials.json audit.log creds_*.json
 
 2. EV_Registry (registro de CPs, HTTPS en puerto 5001)
    python3 EV_Registry.py
+   # Sin parámetros. Escucha en 0.0.0.0:5001 HTTPS
+   # Requiere cert.pem y key.pem en el mismo directorio
 
-3. EV_Central (central de control, puerto 5000 + API REST puerto 8000)
+3. EV_Central (central de control)
    python3 EV_Central.py
    # Con parámetros: python3 EV_Central.py <CENTRAL_PORT> <BROKER_IP> <BROKER_PORT>
    # Valores por defecto: 5000 localhost 9092
+   #
+   # EV_Central expone DOS puertos:
+   #   · Puerto TCP  (por defecto 5000): comunicación con Monitores (EV_CP_M)
+   #   · Puerto REST (siempre 8000)    : API HTTP para EV_W, Front y herramientas externas
+   #
+   # Menú de control:
+   #   1. Parar CP específico (STOP → BROKEN)
+   #   2. Reanudar CP específico (RESUME → ACTIVE)
+   #   3. Parar TODOS los CPs
+   #   4. Reanudar TODOS los CPs
+   #   5. Ver estado de todos los CPs
+   #   6. Refrescar mensajes
+   #   7. Revocar clave Fernet de un CP (notifica al Monitor)
+   #   8. Ver log de auditoría
+   #   0. Salir
 
-4. EV_CP_E / Engine (motor del punto de carga, puerto 6000)
+4. EV_CP_E / Engine (motor del punto de carga)
    python3 EV_CP_E.py
-   # Con parámetros: python3 EV_CP_E.py <BROKER_IP> <BROKER_PORT>
-   # Valores por defecto: localhost 9092
+   # Con parámetros: python3 EV_CP_E.py <BROKER_IP> <BROKER_PORT> <ENGINE_PORT>
+   # Valores por defecto: localhost 9092 6000
    # Pulsa ENTER en cualquier momento para simular fallo temporal (3s)
+   # Para múltiples instancias en la misma máquina usar puertos distintos:
+   #   python3 EV_CP_E.py localhost 9092 6001   # segunda instancia
 
 5. EV_CP_M / Monitor (monitor del punto de carga)
    python3 EV_CP_M.py
    # Con parámetros: python3 EV_CP_M.py <ENGINE_IP> <ENGINE_PORT> <CENTRAL_IP> <CENTRAL_PORT> <CP_ID> <REGISTRY_IP> <REGISTRY_PORT>
    # Valores por defecto: localhost 6000 localhost 5000 ALC1 localhost 5001
-   # Al arrancar: se registra en Registry, obtiene config de Central y clave de cifrado
+   # Si Central no responde al arrancar: aborta con error (no muestra menú de registro)
+   # Al arrancar: se registra en Registry, obtiene config de Central y clave Fernet
    # Si Central cae y vuelve, el Monitor reconecta automáticamente
+   # Menú del Monitor:
+   #   1. Solicitar carga manual
+   #   2. Ver estado detallado
+   #   3. Re-registrar CP en Registry
+   #   4. Re-autenticarse con Central (usar tras revocación de clave con opción 7 de Central)
+   #   0. Salir
 
 6. EV_Driver (aplicación del conductor)
    python3 EV_Driver.py
@@ -50,14 +76,65 @@ rm -f db.json credentials.json audit.log creds_*.json
    # Valores por defecto: localhost 9092 Driver1
    # Opciones: solicitar carga manual o cargar lista desde archivo
 
-7. EV_W / Weather (oficina de control climático) [Release 2]
+7. EV_W / Weather (oficina de control climático)
    python3 EV_W.py
-   # Sin parámetros. Carga localizaciones de locations.txt si existe
-   # Formato locations.txt: CP_ID,Ciudad  (una por línea, ej: ALC1,Alicante)
+   # Con parámetros: python3 EV_W.py <CENTRAL_IP> <CENTRAL_API_PORT>
+   # Valores por defecto: localhost 8000
+   #
+   # CENTRAL_API_PORT = el puerto REST de Central, que siempre es 8000
+   #   NO es el mismo que el puerto TCP de Central (5000 por defecto)
+   #   · Monitores (EV_CP_M) conectan al puerto TCP → 5000
+   #   · EV_W y Front conectan al puerto REST  → 8000
+   #   Correcto:   python3 EV_W.py localhost 8000   ✓
+   #   Incorrecto: python3 EV_W.py localhost 5000   ✗ (puerto TCP, no API REST)
+   #
+   # Al arrancar, EV_W verifica la conexión con el API de Central.
+   # Si el puerto es incorrecto, aborta con un mensaje de error claro.
+   # API key de OpenWeather: se lee de ev_w_config.json; si no existe, la pide por consola
+   # Carga localizaciones de locations.txt al arrancar (formato: CP_ID,Ciudad)
+   # Consulta OpenWeather cada 4 segundos; envía temperatura a Central via POST /weather/data
+   # Si temperatura < 0°C → notifica ALERT a Central → CP pasa a OUT_OF_ORDER
+   # Si temperatura vuelve a >= 0°C → notifica CANCEL → CP vuelve a ACTIVE
+   # Menú del EV_W:
+   #   1. Añadir / cambiar localización (efecto inmediato, sin reiniciar)
+   #   2. Eliminar localización
+   #   3. Ver estado actual
+   #   4. Cambiar API key (se guarda en ev_w_config.json)
+   #   0. Salir
 
-8. FRONT (panel web) [Release 2]
+8. FRONT (panel web)
    xdg-open front.html
-   # Requiere EV_Central corriendo. Accede a http://localhost:8000/api
+   # O abrir con cualquier navegador: firefox front.html
+   # Por defecto conecta a http://localhost:8000
+   # Para despliegue distribuido: front.html?api=http://<IP_CENTRAL>:8000
+   # Se actualiza automáticamente cada 2 segundos
+   # Muestra: estado CPs, drivers activos, temperatura por ciudad, mensajes del sistema
+
+
+============================================================
+  ARCHIVOS GENERADOS EN TIEMPO DE EJECUCIÓN
+============================================================
+db.json          — Base de datos compartida (Registry + Central)
+credentials.json — Credenciales hasheadas de los CPs (Registry)
+creds_<ID>.json  — Credenciales locales del Monitor (una por CP)
+ev_w_config.json — API key de OpenWeather (EV_W)
+audit.log        — Log de auditoría estructurado (Central)
+locations.txt    — Localizaciones monitorizadas (EV_W, opcional)
+cert.pem/key.pem — Certificados SSL para Registry (generados manualmente)
+
+
+============================================================
+  API REST DE EV_CENTRAL (puerto 8000)
+============================================================
+GET  /api/charging_points       — Lista todos los CPs con estado
+GET  /api/charging_points/<id>  — Detalle de un CP
+GET  /api/active_drivers        — Conductores con carga activa en este momento
+GET  /api/weather               — Última temperatura por CP (publicada por EV_W)
+GET  /api/system/status         — Resumen del sistema (contadores por estado)
+GET  /api/messages              — Últimos 50 mensajes del sistema
+GET  /api/health                — Healthcheck del API
+POST /weather/alert             — Recibe alertas climáticas de EV_W (ALERT/CANCEL)
+POST /weather/data              — Recibe lecturas de temperatura de EV_W
 
 
 ============================================================
@@ -66,7 +143,16 @@ rm -f db.json credentials.json audit.log creds_*.json
 # Crear un archivo .txt con un CP_ID por línea:
 ALC1
 ALC1
-MAD1
+ALC2
+
+
+============================================================
+  FORMATO DEL ARCHIVO DE LOCALIZACIONES (EV_W)
+============================================================
+# locations.txt — un CP por línea, formato CP_ID,Ciudad:
+ALC1,Alicante
+ALC2,Alicante
+MAD1,Madrid
 
 
 ============================================================
@@ -79,16 +165,53 @@ docker compose down
 
 
 ============================================================
+  DESPLIEGUE DISTRIBUIDO (3 PCs)
+============================================================
+  PC1: Kafka + EV_Central + Front (front.html)
+  PC2: EV_CP_E + EV_CP_M + EV_W
+  PC3: EV_Driver + EV_Registry
+
+  Sustituir 'localhost' por la IP real de cada máquina en los parámetros:
+
+  # Ejemplo con PC1=192.168.1.10, PC2=192.168.1.20, PC3=192.168.1.30
+  # En PC1:
+  python3 EV_Central.py 5000 192.168.1.10 9092
+
+  # En PC2:
+  python3 EV_CP_E.py 192.168.1.10 9092 6000
+  python3 EV_CP_M.py localhost 6000 192.168.1.10 5000 ALC1 192.168.1.30 5001
+  python3 EV_W.py 192.168.1.10 8000
+
+  # En PC3:
+  python3 EV_Driver.py 192.168.1.10 9092 Driver1
+  python3 EV_Registry.py
+
+  # Front (desde cualquier PC con navegador):
+  front.html?api=http://192.168.1.10:8000
+
+
+============================================================
+  FLUJO DE REVOCACIÓN Y RE-AUTENTICACIÓN DE CLAVE
+============================================================
+  1. Central → opción 7 → revocar clave de ALC1
+     → Monitor recibe aviso; muestra "AVISO: Clave revocada"
+     → Panel Tkinter y Front: ALC1 → OUT_OF_ORDER
+  2. Monitor ALC1 → opción 4 (Re-autenticarse con Central)
+     → Monitor cierra conexión y reconecta con las mismas credenciales
+     → Central genera nueva clave Fernet y la envía al Monitor
+     → Monitor la reenvía al Engine
+     → ALC1 vuelve a ACTIVE; cifrado restaurado
+
+
+============================================================
   NOTAS
 ============================================================
 - EV_Registry y EV_Central comparten db.json como base de datos
-- Las credenciales de cada CP se guardan en credentials.json (Registry)
-  y en creds_<CP_ID>.json (Monitor, localmente)
-- El log de auditoría se guarda en audit.log (generado por Central)
+- Las credenciales de cada CP se guardan en credentials.json (Registry,
+  hasheadas) y en creds_<CP_ID>.json (Monitor, en texto plano local)
+- Las claves Fernet se generan en tiempo de ejecución; no están en el código
+- El log de auditoría (audit.log) registra: fecha+hora, acción, IP/fuente, detalles
 - Si un CP pierde sus credenciales locales, el Monitor las regenera
   automáticamente borrando y re-registrando en Registry
-- Para despliegue distribuido (3 PCs):
-    PC1: Kafka + EV_Central + Front
-    PC2: EV_CP_E + EV_CP_M + EV_W
-    PC3: EV_Driver + EV_Registry
-  Sustituir 'localhost' por la IP real de cada máquina
+- Si el Monitor arranca apuntando a un puerto de Central incorrecto, aborta
+  directamente con un mensaje de error (no muestra menú de registro)
