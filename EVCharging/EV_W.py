@@ -202,9 +202,7 @@ def show_menu():
         print(f"    (ninguna)")
     print(f"{'='*60}")
     print(f"  1. Añadir / cambiar localización")
-    print(f"  2. Eliminar localización")
-    print(f"  3. Ver estado actual")
-    print(f"  4. Cambiar API key")
+    print(f"  2. Ver estado actual")
     print(f"  0. Salir")
     print(f"{'='*60}")
 
@@ -257,45 +255,7 @@ def menu_loop():
                 time.sleep(1)
 
             elif option == "2":
-                clear_screen()
-                display_pending_messages()
-                if not LOCATIONS:
-                    print("\n  No hay localizaciones para eliminar")
-                    input("\n  Presiona ENTER para continuar...")
-                    continue
-
-                print("\n  Localizaciones actuales:")
-                for cp_id, city in LOCATIONS.items():
-                    print(f"    - {cp_id}: {city}")
-
-                cp_id = input("\n  ID del CP a eliminar: ").strip()
-                if cp_id in LOCATIONS:
-                    city = LOCATIONS[cp_id]
-                    if ALERT_STATUS.get(cp_id, False):
-                        log_message(f"Cancelando alerta de {cp_id} antes de eliminar")
-                        notify_central_alert(cp_id, "CANCEL")
-                    del LOCATIONS[cp_id]
-                    del ALERT_STATUS[cp_id]
-                    log_message(f"{cp_id} ({city}) eliminado")
-                else:
-                    log_message(f"CP '{cp_id}' no encontrado")
-                time.sleep(1)
-
-            elif option == "3":
                 continue
-
-            elif option == "4":
-                clear_screen()
-                display_pending_messages()
-                print(f"\n  API key actual: {'*'*(len(API_KEY)-4) + API_KEY[-4:] if API_KEY else '(vacía)'}")
-                new_key = input("  Nueva API key (ENTER para cancelar): ").strip()
-                if new_key:
-                    API_KEY = new_key
-                    save_api_key(new_key)
-                    log_message("API key actualizada y guardada")
-                else:
-                    log_message("Cambio de API key cancelado")
-                time.sleep(1)
 
             elif option == "0":
                 clear_screen()

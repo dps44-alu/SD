@@ -1,6 +1,7 @@
 import sys
 import time
 import threading
+import requests
 from kafka import KafkaProducer, KafkaConsumer
 
 
@@ -12,9 +13,9 @@ class DriverTerminal:
         self.broker_ip = broker_ip
         self.broker_port = broker_port
         self.driver_id = driver_id
+        self.central_api_url = f"http://{broker_ip}:8000"
         self.charging = False
         self.current_cp = None
-        self.available_cps = {}
         self.running = True
         self.manual_charge_active = False
         self.last_consumption = {"kwh": 0, "cost": 0}
@@ -43,10 +44,9 @@ class DriverTerminal:
         print(f"  Driver ID:    {self.driver_id}")
         print(f"  Broker:       {self.broker_ip}:{self.broker_port}")
         print(f"{'='*60}\n")
-        
+
         # Iniciar hilos
         threading.Thread(target=self.listen_kafka, daemon=True).start()
-        threading.Thread(target=self.update_cp_list, daemon=True).start()
     
     # Limpiar pantalla (multiplataforma)
     def clear_screen(self):
@@ -71,26 +71,29 @@ class DriverTerminal:
         print(f"  0. Salir")
         print(f"{'─'*60}")
     
-    # Mostrar lista de CPs disponibles
+    # Mostrar lista de CPs disponibles consultando el API REST de Central
     def show_available_cps(self):
         print(f"\n{'='*60}")
         print(f"  PUNTOS DE CARGA DISPONIBLES")
         print(f"{'='*60}")
-        
-        if not self.available_cps:
-            print("  No hay información de puntos de carga")
-            print("  (Esperando datos del sistema...)")
-        else:
-            print(f"\n  {'ID':<10} {'Dirección':<20} {'Precio':<12} {'Estado'}")
-            print(f"  {'-'*56}")
-            
-            for cp_id, info in sorted(self.available_cps.items()):
-                status = info["status"]
-                address = info["address"]
-                price = info["price"]
-                
-                print(f"  {cp_id:<10} {address:<20} {price:.2f}€/kWh    {status}")
-        
+
+        try:
+            res = requests.get(f"{self.central_api_url}/api/charging_points", timeout=3)
+            cps = res.json().get("data", [])
+            if not cps:
+                print("  No hay puntos de carga registrados en el sistema")
+            else:
+                print(f"\n  {'ID':<10} {'Dirección':<20} {'Precio':<12} {'Estado'}")
+                print(f"  {'-'*56}")
+                for cp in sorted(cps, key=lambda x: x['id']):
+                    print(f"  {cp['id']:<10} {cp['address']:<20} "
+                          f"{float(cp['price']):.2f}€/kWh    {cp['status']}")
+        except requests.exceptions.ConnectionError:
+            print(f"  No se puede conectar con Central en {self.central_api_url}")
+            print(f"  Verifica que Central está activa.")
+        except Exception as e:
+            print(f"  Error consultando Central: {e}")
+
         print(f"{'='*60}\n")
     
     # Solicitar una carga única
@@ -105,13 +108,17 @@ class DriverTerminal:
             input("\n  Presiona ENTER para continuar...")
             return
         
-        # Mostrar CPs disponibles primero
-        if self.available_cps:
-            active_cps = [cp for cp, info in self.available_cps.items() if info['status'] == 'ACTIVE']
+        # Mostrar CPs disponibles
+        try:
+            res = requests.get(f"{self.central_api_url}/api/charging_points", timeout=3)
+            cps = res.json().get("data", [])
+            active_cps = [cp['id'] for cp in cps if cp['status'] == 'ACTIVE']
             if active_cps:
                 print(f"\n  CPs disponibles: {', '.join(active_cps)}")
             else:
                 print(f"\n  No hay puntos de carga disponibles en este momento")
+        except Exception:
+            print(f"\n  (No se pudo consultar CPs — verifica que Central está activa en {self.central_api_url})")
         
         cp_id = input("\n  Introduce el ID del Punto de Carga: ").strip()
         
@@ -343,31 +350,6 @@ class DriverTerminal:
                     self.pending_ack = True
     
     
-    # Actualizar lista de CPs disponibles desde BD
-    def update_cp_list(self):
-        import json
-        
-        while self.running:
-            try:
-                with open("db.json", "r") as f:
-                    db = json.load(f)
-                
-                new_cps = {}
-                for cp in db.get("charging_points", []):
-                    cp_id = cp["id"]
-                    new_cps[cp_id] = {
-                        "status": cp["status"],
-                        "address": cp["address"],
-                        "price": cp["price"]
-                    }
-                
-                self.available_cps = new_cps
-                
-            except Exception as e:
-                pass
-            
-            time.sleep(2)
-    
     # Ejecutar el menú principal
     def run(self):
         while self.running:
@@ -412,9 +394,9 @@ class DriverTerminal:
 
 # Leer argumentos de línea de comandos
 def args():
-    broker_ip   = sys.argv[1] if len(sys.argv) > 1 else 'localhost'
-    broker_port = sys.argv[2] if len(sys.argv) > 2 else '9092'
-    driver_id   = sys.argv[3] if len(sys.argv) > 3 else 'Driver1'
+    broker_ip    = sys.argv[1] if len(sys.argv) > 1 else 'localhost'
+    broker_port  = sys.argv[2] if len(sys.argv) > 2 else '9092'
+    driver_id    = sys.argv[3] if len(sys.argv) > 3 else 'Driver1'
     return broker_ip, broker_port, driver_id
 
 

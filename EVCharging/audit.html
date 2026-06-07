@@ -190,7 +190,6 @@
     <option value="WEATHER_ALERT">WEATHER_ALERT</option>
     <option value="WEATHER_CANCEL">WEATHER_CANCEL</option>
   </select>
-  <input id="filter-text" type="text" placeholder="Buscar en fuente o detalles...">
   <button id="clear-btn" onclick="clearFilters()">Limpiar filtros</button>
   <span id="count-badge">0 entradas</span>
 </div>
@@ -237,7 +236,6 @@
     const tr = document.createElement('tr');
     if (isNew) tr.classList.add('new-row');
     tr.dataset.action = entry.action;
-    tr.dataset.search = `${entry.source} ${entry.details}`.toLowerCase();
     tr.innerHTML = `
       <td class="ts">${entry.timestamp}</td>
       <td>${badge(entry.action)}</td>
@@ -249,14 +247,11 @@
 
   function applyFilters() {
     const action = document.getElementById('filter-action').value;
-    const text   = document.getElementById('filter-text').value.toLowerCase();
     const tbody  = document.getElementById('audit-body');
     let visible  = 0;
 
     for (const tr of tbody.querySelectorAll('tr')) {
-      const matchAction = !action || tr.dataset.action === action;
-      const matchText   = !text   || tr.dataset.search.includes(text);
-      const show = matchAction && matchText;
+      const show = !action || tr.dataset.action === action;
       tr.style.display = show ? '' : 'none';
       if (show) visible++;
     }
@@ -267,12 +262,10 @@
 
   function clearFilters() {
     document.getElementById('filter-action').value = '';
-    document.getElementById('filter-text').value   = '';
     applyFilters();
   }
 
   document.getElementById('filter-action').addEventListener('change', applyFilters);
-  document.getElementById('filter-text').addEventListener('input',  applyFilters);
 
   // ── Carga inicial ──────────────────────────────────────────────────────────
   async function loadInitial() {

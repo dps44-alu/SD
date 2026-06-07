@@ -25,6 +25,9 @@ AUDIT_LOG_FILE = "audit.log"
 LABELS = {}
 MESSAGE_WIDGET = None
 DRIVERS_WIDGET = None
+_PANEL_ROOT = None
+_DRV_FRAME = None
+_MSG_FRAME = None
 CHARGING_START_TIMES = {}
 CHARGING_START_LOCK = threading.Lock()
 DB_LOCK = threading.Lock()
@@ -315,6 +318,7 @@ def control_menu_loop():
                     print(f"\n  Enviando comando STOP a {cp_id}...")
                     if stop_charging_point(cp_id):
                         print(f"  CP {cp_id} detenido correctamente (estado: BROKEN)")
+                        audit("CP_STOP", "central_menu", f"cp_id={cp_id}")
                     else:
                         print(f"  No se pudo detener el CP {cp_id}")
                 else:
@@ -336,6 +340,7 @@ def control_menu_loop():
                     print(f"\n  Enviando comando RESUME a {cp_id}...")
                     if resume_charging_point(cp_id):
                         print(f"  CP {cp_id} reanudado correctamente")
+                        audit("CP_RESUME", "central_menu", f"cp_id={cp_id}")
                     else:
                         print(f"  No se pudo reanudar el CP {cp_id}")
                 else:
@@ -406,12 +411,28 @@ def control_menu_loop():
                 cp_id = input("\n  ID del CP al que revocar clave: ").strip()
 
                 if cp_id in active_keys:
+                    cp = get_charging_point(cp_id)
+                    was_busy = cp and cp.get("status") == "BUSY"
+                    busy_driver = cp.get("driver", "") if cp else ""
+                    busy_kwh = cp.get("kwh_consumed", 0) if cp else 0
+                    busy_cost = cp.get("money_consumed", 0) if cp else 0
+
                     with CP_KEYS_LOCK:
                         del CP_KEYS[cp_id]
-                    update_charging_point(cp_id, "OUT_OF_ORDER")
+                    update_charging_point(cp_id, "OUT_OF_ORDER", "", 0, 0)
                     audit("KEY_REVOKED", "central_menu", f"cp_id={cp_id}")
                     log_message(f"Central: Clave revocada para {cp_id} → OUT_OF_ORDER")
                     print(f"  Clave de {cp_id} revocada. CP puesto en OUT_OF_ORDER.")
+
+                    if was_busy and busy_driver and SHARED_PRODUCER:
+                        ticket = (f"CHARGE_INTERRUPTED#{busy_driver}#{cp_id}"
+                                  f"#{busy_kwh:.2f}#{busy_cost:.2f}#clave revocada por Central")
+                        SHARED_PRODUCER.send("respuestas_central", ticket)
+                        SHARED_PRODUCER.flush()
+                        log_message(f"Central: Ticket parcial enviado a {busy_driver} — {busy_kwh:.2f} kWh, {busy_cost:.2f}€")
+                        audit("CHARGE_INTERRUPTED", cp_id, f"driver={busy_driver} kwh={busy_kwh:.2f} cost={busy_cost:.2f}")
+                        with CHARGING_START_LOCK:
+                            CHARGING_START_TIMES.pop(cp_id, None)
                     with CONNECTIONS_LOCK:
                         monitor_conn = ACTIVE_CONNECTIONS.get(cp_id)
                     if monitor_conn:
@@ -465,8 +486,8 @@ def control_menu_loop():
 # Panel Tkinter
 # ---------------------------
 status_colors = {
-    "ACTIVE":       "#2e7d32",   # dark green
-    "BUSY":         "#1565c0",   # blue
+    "ACTIVE":       "#2e7d32",   # green
+    "BUSY":         "#2e7d32",   # green (same as ACTIVE)
     "OUT_OF_ORDER": "#e65100",   # orange
     "BROKEN":       "#b71c1c",   # red
     "INACTIVE":     "#424242",   # dark grey
@@ -513,11 +534,12 @@ def _make_section(parent, title, text_height):
 
 
 def create_panel():
-    global LABELS, MESSAGE_WIDGET, DRIVERS_WIDGET
+    global LABELS, MESSAGE_WIDGET, DRIVERS_WIDGET, _PANEL_ROOT, _DRV_FRAME, _MSG_FRAME
 
     root = tk.Tk()
     root.title("SD EV Charging Solution - Monitorization Panel")
     root.configure(bg="#1e1e1e")
+    _PANEL_ROOT = root
 
     cols = 3
     cps = list_charging_points()
@@ -537,19 +559,18 @@ def create_panel():
     bottom_row = (max(len(cps) - 1, 0) // cols) + 1
 
     # --- ON GOING DRIVERS REQUESTS (first) ---
-    drv_frame, DRIVERS_WIDGET = _make_section(root, "ON GOING DRIVERS REQUESTS", 5)
-    drv_frame.grid(row=bottom_row, column=0, columnspan=cols,
-                   padx=4, pady=(8, 2), sticky="ew")
-    # monospace header/row tags
+    _DRV_FRAME, DRIVERS_WIDGET = _make_section(root, "ON GOING DRIVERS REQUESTS", 5)
+    _DRV_FRAME.grid(row=bottom_row, column=0, columnspan=cols,
+                    padx=4, pady=(8, 2), sticky="ew")
     DRIVERS_WIDGET.tag_configure("header", foreground="#58a6ff", font=("Consolas", 9, "bold"))
     DRIVERS_WIDGET.tag_configure("sep",    foreground="#30363d")
     DRIVERS_WIDGET.tag_configure("row",    foreground="#c9d1d9")
     DRIVERS_WIDGET.tag_configure("empty",  foreground="#484f58")
 
     # --- APPLICATION MESSAGES (second) ---
-    msg_frame, MESSAGE_WIDGET = _make_section(root, "APPLICATION MESSAGES", 8)
-    msg_frame.grid(row=bottom_row + 1, column=0, columnspan=cols,
-                   padx=4, pady=(2, 8), sticky="ew")
+    _MSG_FRAME, MESSAGE_WIDGET = _make_section(root, "APPLICATION MESSAGES", 8)
+    _MSG_FRAME.grid(row=bottom_row + 1, column=0, columnspan=cols,
+                    padx=4, pady=(2, 8), sticky="ew")
     MESSAGE_WIDGET.tag_configure("ts",   foreground="#484f58")
     MESSAGE_WIDGET.tag_configure("ok",   foreground="#3fb950")
     MESSAGE_WIDGET.tag_configure("warn", foreground="#d29922")
@@ -561,13 +582,37 @@ def create_panel():
 
 
 def refresh_panel(root):
+    global _DRV_FRAME, _MSG_FRAME
+
     if SHUTDOWN_FLAG:
         root.quit()
         return
 
+    cols = 3
     cps = list_charging_points()
 
-    # CP tiles
+    # Detect new CPs and create their tiles
+    new_cps = [cp for cp in cps if cp["id"] not in LABELS]
+    if new_cps:
+        for cp in new_cps:
+            i = list(cps).index(cp)
+            r, c = i // cols, i % cols
+            text, color = _cp_tile_content(cp)
+            label = tk.Label(root, text=text, bg=color, fg="white",
+                             font=("Arial", 12), width=20, height=8,
+                             relief="flat", borderwidth=0)
+            label.grid(row=r, column=c, padx=4, pady=4, sticky="nsew")
+            LABELS[cp["id"]] = label
+        # Reposition bottom sections after new tiles
+        bottom_row = (max(len(cps) - 1, 0) // cols) + 1
+        if _DRV_FRAME:
+            _DRV_FRAME.grid(row=bottom_row, column=0, columnspan=cols,
+                            padx=4, pady=(8, 2), sticky="ew")
+        if _MSG_FRAME:
+            _MSG_FRAME.grid(row=bottom_row + 1, column=0, columnspan=cols,
+                            padx=4, pady=(2, 8), sticky="ew")
+
+    # Update existing CP tiles
     for cp in cps:
         label = LABELS.get(cp["id"])
         if label:
@@ -657,7 +702,11 @@ def listen_cp_consumption(broker_ip, broker_port):
             with CP_KEYS_LOCK:
                 fernet = CP_KEYS.get(cp_id_prefix)
             if fernet:
-                consumption = fernet.decrypt(token.encode()).decode()
+                try:
+                    consumption = fernet.decrypt(token.encode()).decode()
+                except Exception:
+                    log_message(f"Central: CP {cp_id_prefix} — mensaje no comprensible (clave incorrecta)")
+                    continue
             else:
                 consumption = raw
         except Exception:
@@ -839,19 +888,6 @@ def handle_monitor_connection(conn, addr):
             parts = msg.split("#")
             msg_type = parts[0]
 
-            if msg_type == "REQUEST_CONFIG":
-                cp_id = parts[1]
-                cp = get_charging_point(cp_id)
-
-                if cp:
-                    response = f"CONFIG_OK#{cp['address']}#{cp['price']}#{cp['status']}"
-                    conn.sendall(response.encode())
-                    log_message(f"Central: Config enviada a Monitor CP {cp_id}")
-                else:
-                    conn.sendall(b"CONFIG_NOT_FOUND")
-                    log_message(f"Central: CP {cp_id} no encontrado en BD")
-                continue
-
             if msg_type in ("STOP_OK", "RESUME_OK", "ERROR"):
                 with COMMAND_RESPONSE_LOCK:
                     q = COMMAND_RESPONSE_QUEUES.get(cp_id)
@@ -874,7 +910,6 @@ def handle_monitor_connection(conn, addr):
                 auth_ok = cp_authentication(cp_id, username, password)
 
                 if auth_ok:
-                    # Generate per-CP symmetric key
                     key = Fernet.generate_key()
                     fernet = Fernet(key)
                     with CP_KEYS_LOCK:
@@ -890,30 +925,9 @@ def handle_monitor_connection(conn, addr):
                     log_message(f"Central: CP autenticado {cp_id}")
                     audit("AUTH_SUCCESS", source_ip, f"cp_id={cp_id} user={username}")
                 else:
-                    # CP may not have credentials yet (first registration path)
-                    cp_exists = any(cp["id"] == cp_id for cp in list_charging_points())
-                    addr_taken = any(cp["address"] == cp_address for cp in list_charging_points())
-
-                    if cp_exists or addr_taken:
-                        conn.sendall(b"REJECTED")
-                        log_message(f"Central: CP {cp_id} rechazado (credenciales inválidas)")
-                        audit("AUTH_FAIL", source_ip, f"cp_id={cp_id} user={username}")
-                    else:
-                        # New CP — accept without credentials (will register via Registry)
-                        key = Fernet.generate_key()
-                        fernet = Fernet(key)
-                        with CP_KEYS_LOCK:
-                            CP_KEYS[cp_id] = fernet
-
-                        response = f"ACCEPTED#{key.decode()}"
-                        conn.sendall(response.encode())
-                        add_charging_point(cp_id, cp_address, cp_price, cp_status)
-
-                        with CONNECTIONS_LOCK:
-                            ACTIVE_CONNECTIONS[cp_id] = conn
-
-                        log_message(f"Central: CP nuevo registrado {cp_id}")
-                        audit("AUTH_NEW_CP", source_ip, f"cp_id={cp_id}")
+                    conn.sendall(b"REJECTED")
+                    log_message(f"Central: CP {cp_id} rechazado (credenciales inválidas)")
+                    audit("AUTH_FAIL", source_ip, f"cp_id={cp_id} user={username}")
 
             elif msg_type == "CHANGE":
                 cp_exists = any(cp["id"] == cp_id for cp in list_charging_points())
@@ -971,6 +985,7 @@ def handle_monitor_connection(conn, addr):
                     cp.get("money_consumed", 0)
                 )
             log_message(f"Central: CP {cp_id} desconectado → INACTIVE")
+            audit("CP_DISCONNECTED", cp_id, "Monitor desconectado")
         conn.close()
 
 

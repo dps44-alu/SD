@@ -115,14 +115,9 @@ python3 EV_Driver.py localhost 9092 Driver1
 1. Con datos en la tabla, seleccionar un tipo de evento en el desplegable (ej. `AUTH_SUCCESS`).
    - **Resultado esperado:** Solo se muestran filas de ese tipo. El contador se actualiza.
 
-2. Escribir texto en el campo de búsqueda (ej. `ALC1`).
-   - **Resultado esperado:** Solo se muestran filas cuya fuente o detalles contienen `ALC1`.
+2. Pulsar "Limpiar filtros" → todas las filas vuelven a aparecer.
 
-3. Combinar desplegable + búsqueda de texto.
-
-4. Pulsar "Limpiar filtros" → todas las filas vuelven a aparecer.
-
-5. Verificar que las nuevas entradas SSE **también respetan los filtros activos** (si hay filtro `AUTH_FAIL` activo y llega un `AUTH_SUCCESS`, este no se muestra).
+3. Verificar que las nuevas entradas SSE **también respetan los filtros activos** (si hay filtro `AUTH_FAIL` activo y llega un `AUTH_SUCCESS`, este no se muestra).
 
 **Resultado esperado:** Filtros funcionan en tiempo real sobre la tabla.
 

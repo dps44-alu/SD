@@ -14,9 +14,9 @@ docker compose up -d
 python3 EV_Registry.py
 python3 EV_Central.py
 python3 EV_CP_E.py                                    # Engine ALC1
-python3 EV_CP_M.py                                    # Monitor ALC1
+python3 EV_CP_M.py                                    # Monitor ALC1 → muestra menú de registro; seleccionar "1" e introducir dirección y precio
 python3 EV_CP_E.py localhost 9092 6001                # Engine ALC2
-python3 EV_CP_M.py localhost 6001 localhost 5000 ALC2 # Monitor ALC2
+python3 EV_CP_M.py localhost 6001 localhost 5000 ALC2 # Monitor ALC2 → igual, seleccionar "1" e introducir datos
 python3 EV_W.py                                       # pide API key la primera vez
 python3 EV_Driver.py localhost 9092 Driver1
 # Abrir front: front.html (doble clic o servidor web)
@@ -139,13 +139,13 @@ python3 EV_Driver.py localhost 9092 Driver1
 **Escenario B — Revocación de clave:**
 1. Desde Central, opción `7` → revocar clave de ALC1.
 2. **Resultado esperado simultáneamente:**
-   - **Monitor ALC1:** aparece aviso "AVISO: Clave revocada por Central. Usa opción 4 para re-autenticarte."
+   - **Monitor ALC1:** aparece aviso "AVISO: Clave revocada por Central. Usa opción 3 para re-autenticarte."
    - **Panel Tkinter Central:** ALC1 → naranja (OUT_OF_ORDER).
    - **Front:** ALC1 badge "Fuera Servicio".
    - **Application Messages (front y Tkinter):** log de la revocación.
-3. Los mensajes Kafka de ALC1 ya no se descifran → Central los ignora.
+3. Los mensajes Kafka de ALC1 ya no se descifran → **Central muestra en APPLICATION MESSAGES** "CP ALC1 — mensaje no comprensible (clave incorrecta)"; el Front también lo recibe vía `/api/messages`.
 4. Driver intenta carga en ALC1 → rechazada.
-5. Desde Monitor ALC1, opción `4` (Re-autenticarse con Central).
+5. Desde Monitor ALC1, opción `3` (Re-autenticarse con Central).
 6. **Resultado esperado:** Monitor obtiene nueva clave Fernet, la envía al Engine. ALC1 vuelve a ACTIVE. Cargas aceptadas de nuevo.
 
 ---

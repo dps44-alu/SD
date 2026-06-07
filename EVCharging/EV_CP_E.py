@@ -22,6 +22,7 @@ STOP_CHARGE = False
 MANUALLY_STOPPED = False
 CHARGE_LOCK = threading.Lock()
 FERNET = None
+KEY_REVOKED_FLAG = False
 LAST_CHARGE_END = None
 
 ENGINE_MESSAGES = []
@@ -48,7 +49,7 @@ def display_engine_screen():
         current_state = (
             CP_STATUS, CP_ID, CHARGING_ACTIVE,
             CURRENT_DRIVER, CURRENT_KWH, CURRENT_COST,
-            tuple(msgs)
+            tuple(msgs), KEY_REVOKED_FLAG
         )
 
         if current_state != last_state:
@@ -72,6 +73,12 @@ def display_engine_screen():
                     print(f"  {m}")
             else:
                 print(f"  (sin mensajes)")
+
+            if KEY_REVOKED_FLAG:
+                print(f"{'!'*60}")
+                print(f"  AVISO: CLAVE REVOCADA POR CENTRAL")
+                print(f"  Mensajes Kafka no cifrados. Re-autenticate desde el Monitor.")
+                print(f"{'!'*60}")
 
             print(f"{'='*60}")
             print(f"  >>> Pulsa ENTER para simular fallo temporal (3s) <<<")
@@ -199,7 +206,7 @@ def handle_charging(producer, driver_id, cp_id, duration):
 
 
 def handle_monitor(conn, addr, producer):
-    global CP_ID, CP_PRICE, CP_ADDRESS, CP_STATUS, CONFIG_RECEIVED, CURRENT_DRIVER, CURRENT_KWH, CURRENT_COST, STOP_CHARGE, CHARGING_ACTIVE, MANUALLY_STOPPED, FERNET, LAST_CHARGE_END
+    global CP_ID, CP_PRICE, CP_ADDRESS, CP_STATUS, CONFIG_RECEIVED, CURRENT_DRIVER, CURRENT_KWH, CURRENT_COST, STOP_CHARGE, CHARGING_ACTIVE, MANUALLY_STOPPED, FERNET, LAST_CHARGE_END, KEY_REVOKED_FLAG
     last_status = ""
 
     while True:
@@ -234,6 +241,7 @@ def handle_monitor(conn, addr, producer):
 
                 if enc_key:
                     FERNET = Fernet(enc_key.encode())
+                    KEY_REVOKED_FLAG = False
                     engine_log("Clave de cifrado configurada")
                 else:
                     FERNET = None
@@ -247,6 +255,11 @@ def handle_monitor(conn, addr, producer):
                 if LAST_CHARGE_END:
                     engine_log("Re-enviando CHARGE_END con nueva clave (recuperación)")
                     kafka_send(producer, "consumo_cps", LAST_CHARGE_END)
+
+            elif msg_type == "KEY_REVOKED":
+                KEY_REVOKED_FLAG = True
+                engine_log("AVISO: Clave revocada por Central — re-autenticate desde el Monitor")
+                conn.sendall(b"OK")
 
             elif msg_type == "MANUAL_CHARGE":
                 cp_id = parts[1]

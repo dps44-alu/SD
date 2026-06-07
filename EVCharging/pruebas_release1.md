@@ -11,9 +11,9 @@ docker compose up -d
 python3 EV_Registry.py
 python3 EV_Central.py
 python3 EV_CP_E.py                                    # Engine ALC1
-python3 EV_CP_M.py                                    # Monitor ALC1
+python3 EV_CP_M.py                                    # Monitor ALC1 → muestra menú de registro; seleccionar "1" e introducir dirección y precio
 python3 EV_CP_E.py localhost 9092 6001                # Engine ALC2 (puerto TCP distinto si misma máquina)
-python3 EV_CP_M.py localhost 6001 localhost 5000 ALC2 # Monitor ALC2
+python3 EV_CP_M.py localhost 6001 localhost 5000 ALC2 # Monitor ALC2 → igual, seleccionar "1" e introducir datos
 python3 EV_Driver.py localhost 9092 Driver1
 ```
 
@@ -45,7 +45,7 @@ python3 EV_Driver.py localhost 9092 Driver1
 1. Con ALC1, ALC2 y Driver1 corriendo, seleccionar opción `3` en el Driver → introducir `cargas.txt`.
 2. Confirmar con `s` y **no tocar ningún terminal**.
 3. Observar simultáneamente:
-   - **Panel Tkinter:** ALC1 y ALC2 cambian verde→azul→verde a medida que procesan cargas.
+   - **Panel Tkinter:** ALC1 y ALC2 alternan entre verde (ACTIVE, disponible) y verde oscuro (BUSY, cargando) a medida que procesan cargas.
    - **Sección ON GOING DRIVERS REQUESTS:** aparece Driver1 con CP, hora de inicio, kWh y € en tiempo real.
    - **Sección APPLICATION MESSAGES:** registra cada evento (petición aceptada, consumo, finalización).
    - **Terminal Monitor:** muestra CARGANDO con kWh/€ actualizándose cada segundo.
@@ -60,10 +60,10 @@ python3 EV_Driver.py localhost 9092 Driver1
 
 **Objetivo:** Solo CPs con credenciales válidas son aceptados por Central.
 
-**Escenario A — recuperación automática de credenciales:**
-1. Con ALC1 ya registrado, borrar `creds_ALC1.json` y `credentials.json`.
+**Escenario A — re-registro manual de credenciales:**
+1. Con ALC1 ya registrado, borrar `credentials.json`.
 2. Reiniciar Monitor ALC1.
-3. **Resultado esperado:** El Monitor detecta que no tiene credenciales locales, borra el CP del Registry, se re-registra, obtiene credenciales nuevas y se autentica en Central → panel muestra ALC1 en verde.
+3. **Resultado esperado:** El Monitor muestra el menú de registro. El usuario introduce dirección, precio y selecciona `1`. El Monitor se re-registra en Registry (borrando la entrada anterior si existe y creando una nueva), obtiene credenciales nuevas y se autentica en Central → panel muestra ALC1 en verde.
 
 **Escenario B — rechazo por credenciales inválidas:**
 1. Con ALC1 registrado, editar `credentials.json` y cambiar la contraseña de ALC1 por cualquier otra.

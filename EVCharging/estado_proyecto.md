@@ -16,7 +16,7 @@
 **Tópicos Kafka:** `peticiones_conductores`, `peticiones_carga`, `consumo_cps`, `respuestas_central`
 
 **Base de datos compartida:** `db.json` (Registry + Central)  
-**Credenciales:** `credentials.json` (Registry) + `creds_<CP_ID>.json` (Monitor local)  
+**Credenciales:** `credentials.json` (Registry) — en memoria durante la sesión del Monitor  
 **Log de auditoría:** `audit.log` (generado por Central)  
 **Config EV_W:** `ev_w_config.json` (API key OpenWeather)
 
@@ -34,7 +34,7 @@
 | Flujo completo de carga: REQUEST → BUSY → TICKET | ✅ |
 | STOP / RESUME desde menú de Central | ✅ |
 | Carga manual desde Monitor | ✅ |
-| Carga desde archivo (EV_Driver opción 3) | ✅ |
+| Carga desde archivo (EV_Driver opción 3) — `cargas.txt` tiene 12 entradas | ✅ |
 | Log de auditoría (`audit.log`) | ✅ |
 | Revocación de clave desde menú Central (opción 7) | ✅ |
 
@@ -42,7 +42,7 @@
 | Elemento | Estado |
 |---|---|
 | Tiles CP con colores por estado | ✅ |
-| ACTIVE = verde / BUSY = azul / OUT_OF_ORDER = naranja / BROKEN = rojo / DESCONECTADO = gris | ✅ |
+| ACTIVE = verde / BUSY = verde oscuro (cargando) / OUT_OF_ORDER = naranja / BROKEN = rojo / DESCONECTADO = gris | ✅ |
 | Sección ON GOING DRIVERS REQUESTS (conductor, CP, inicio, kWh, €) | ✅ |
 | Sección APPLICATION MESSAGES con colores por tipo y scrollbar | ✅ |
 
@@ -53,17 +53,14 @@
 | Monitor cae → Central bloquea nuevas cargas (INACTIVE en db) | ✅ |
 | Monitor cae durante carga → carga termina, CP queda INACTIVE al final | ✅ |
 | Engine cae → Monitor notifica OUT_OF_ORDER a Central | ✅ |
-| Central cae → Driver recibe aviso; carga continúa; ticket al reconectar | ✅ |
-| Central cae → Monitor reconecta automáticamente al volver | ✅ |
+| Central cae → carga continúa; Monitor reconecta automáticamente al volver | ✅ |
 | Driver cae → carga continúa, Driver recibe TICKET al reconectar | ✅ |
-| Monitor arranca con puerto TCP incorrecto → aborta con error | ✅ |
 
 ### Release 2 — EV_W
 | Función | Estado |
 |---|---|
 | API key de OpenWeather en archivo `ev_w_config.json` | ✅ |
-| API key pedida por consola si no existe el archivo | ✅ |
-| Cambio de API key en caliente (opción 4 del menú) | ✅ |
+| API key pedida por consola al arranque si no existe el archivo | ✅ |
 | IP y puerto de Central parametrizables por CLI (`<CENTRAL_IP> <CENTRAL_PORT>`) | ✅ |
 | Verificación al arranque de que el puerto apunta al API REST (no al TCP) | ✅ |
 | Localizaciones cargadas desde `locations.txt` al arrancar | ✅ |
@@ -71,6 +68,7 @@
 | Temperatura enviada a Central (`POST /weather/data`) cada 4 segundos | ✅ |
 | Alerta climática (temp < 0°C) → CP pasa a OUT_OF_ORDER | ✅ |
 | Cancelación de alerta (temp ≥ 0°C) → CP vuelve a ACTIVE | ✅ |
+| Suministro en curso termina antes de parar CP (PENDING_WEATHER_STOP) | ✅ |
 
 ### Release 2 — Front web
 | Función | Estado |
@@ -84,14 +82,33 @@
 | Banner de error si Central no responde | ✅ |
 | Múltiples navegadores simultáneos (polling cada 2s, sin estado) | ✅ |
 
-### Release 2 — Re-autenticación tras revocación de clave
+### Release 2 — Seguridad y re-autenticación
 | Función | Estado |
 |---|---|
-| Central envía `KEY_REVOKED` al Monitor via TCP al revocar | ✅ |
-| Monitor muestra aviso de clave revocada en su menú | ✅ |
-| Monitor opción 4: re-autenticarse con Central sin reiniciar | ✅ |
+| Registry HTTPS con certificado autofirmado | ✅ |
+| Credenciales generadas por Registry, no almacenadas en el Monitor | ✅ |
+| Central envía `KEY_REVOKED` al Monitor vía TCP al revocar | ✅ |
+| Monitor reenvía `KEY_REVOKED` al Engine vía TCP | ✅ |
+| Monitor muestra banner de clave revocada | ✅ |
+| Engine muestra banner de clave revocada | ✅ |
+| Monitor opción 3: re-autenticarse con Central sin reiniciar | ✅ |
 | Central genera nueva clave Fernet y la distribuye al reconectar | ✅ |
-| Engine recibe la nueva clave; cifrado restaurado | ✅ |
+| Engine recibe la nueva clave; banner desaparece; cifrado restaurado | ✅ |
+| Central muestra "mensaje no comprensible" si la clave no coincide | ✅ |
+
+### Release 2 — Log de auditoría
+| Evento | Estado |
+|---|---|
+| `SYSTEM_START` — al arrancar Central | ✅ |
+| `AUTH_SUCCESS` — autenticación exitosa de un CP | ✅ |
+| `AUTH_FAIL` — autenticación fallida | ✅ |
+| `CHARGE_END` — fin de carga normal | ✅ |
+| `CHARGE_INTERRUPTED` — carga interrumpida (STOP o Engine caído) | ✅ |
+| `KEY_REVOKED` — revocación de clave desde Central | ✅ |
+| `WEATHER_ALERT` — alerta climática recibida de EV_W | ✅ |
+| `WEATHER_CANCEL` — cancelación de alerta climática | ✅ |
+| `CP_STOP` / `CP_RESUME` — parada/reanudación manual desde Central | ✅ |
+| `CP_DISCONNECTED` — Monitor desconectado | ✅ |
 
 ### Release 2 — API REST de Central
 | Endpoint | Estado |
@@ -122,34 +139,46 @@
 | Actualización en tiempo real vía SSE (sin polling) | ✅ |
 | Badges de color por tipo de evento | ✅ |
 | Filtro por tipo de evento (desplegable) | ✅ |
-| Búsqueda libre en fuente y detalles | ✅ |
 | Indicador de conexión + reconexión automática | ✅ |
 | URL `?api=http://...` para despliegue distribuido | ✅ |
 
 ---
 
-## Estado de pruebas (Release 2)
+## Funcionalidades pendientes / limitaciones conocidas
 
-| Prueba | Descripción | Estado |
+| Item | Detalle | Impacto |
 |---|---|---|
-| Prueba 1 | Parametrización (API key, URL Central, URL front) | ✅ Pasada |
-| Prueba 2 | Front: múltiples navegadores, estado completo | ✅ Pasada |
-| Prueba 3 | Front: resiliencia (Central caída, EV_W caído) | ✅ Pasada |
-| Prueba 4 | EV_W: alertas climáticas y cambio de localización en caliente | ✅ Pasada |
-| Prueba 5 | Seguridad: Registry HTTPS | ✅ Pasada |
-| Prueba 6 | Seguridad: cifrado Kafka y revocación de claves | ✅ Pasada |
-| Prueba 7 | Log de auditoría | ✅ Pasada |
-| Prueba 8 | Resiliencia general (criterios Release 1 con sistema Release 2) | ✅ Pasada |
+| `AUTH_NEW_CP` audit event | No se distingue primer registro de re-autenticación en el log (ambos producen `AUTH_SUCCESS`) | Bajo |
+| `driver1.txt` con solo 3 entradas | La guía R1 exige ≥10 servicios en el fichero. Usar `cargas.txt` (12 entradas) para las pruebas | Bajo |
+| STX/ETX/LRC | Protocolo de framing opcional; no implementado | Sin penalización |
+| Despliegue en 3 máquinas | Pendiente de verificación en laboratorio | — |
 
-## Estado de pruebas (Release 3)
+---
 
-| Prueba | Descripción | Estado |
-|---|---|---|
-| Prueba 1 | API REST de auditoría y filtros | ✅ Pasada (local) |
-| Prueba 2 | Audit front: carga inicial y colores | ✅ Pasada (local) |
-| Prueba 3 | Audit front: tiempo real (SSE) | ✅ Pasada (local) |
-| Prueba 4 | Audit front: filtros | ✅ Pasada (local) |
-| Prueba 5 | Audit front: resiliencia y despliegue distribuido | ⏳ Pendiente (sin múltiples equipos) |
+## Menús de cada módulo
+
+### EV_Central — menú TCP (consola)
+```
+1: Parar CP       2: Reanudar CP     3: Parar todos
+4: Reanudar todos 5: Ver CPs         6: Ver conductores
+7: Revocar clave  0: Salir
+```
+
+### EV_CP_M (Monitor) — menú interactivo
+```
+1: carga manual  |  2: re-registrar  |  3: re-autenticar  |  0: salir
+```
+
+### EV_W — menú interactivo
+```
+1: Añadir / cambiar localización  |  2: Ver estado actual  |  0: Salir
+```
+
+### EV_Driver — menú interactivo
+```
+1: Solicitar carga manual   2: Ver CPs disponibles
+3: Cargar desde archivo     0: Salir
+```
 
 ---
 
@@ -157,7 +186,7 @@
 
 | Monitor | Engine | Estado en panel | Color |
 |---|---|---|---|
-| OK | OK | ACTIVE / BUSY | Verde / Azul |
+| OK | OK | ACTIVE / BUSY | Verde / Verde oscuro |
 | OK | KO (caído) | OUT_OF_ORDER | Naranja |
 | KO (caído) | OK | DESCONECTADO | Gris |
 | KO (caído) | KO (caído) | DESCONECTADO | Gris |
@@ -183,6 +212,7 @@ EV_CP_M.py     [ENGINE_IP]  [ENGINE_PORT]  [CENTRAL_IP]  [CENTRAL_PORT]  [CP_ID]
 
 EV_Driver.py   [BROKER_IP]  [BROKER_PORT]  [DRIVER_ID]
   defecto:      localhost     9092           Driver1
+  (URL de Central derivada automáticamente de BROKER_IP:8000)
 
 EV_W.py        [CENTRAL_IP]  [CENTRAL_API_PORT]
   defecto:      localhost      8000
@@ -209,6 +239,7 @@ Audit Front:
 
 ```bash
 # PC1 (192.168.1.10):
+docker compose up -d
 python3 EV_Central.py 5000 192.168.1.10 9092
 
 # PC2 (192.168.1.20):
@@ -217,9 +248,10 @@ python3 EV_CP_M.py localhost 6000 192.168.1.10 5000 ALC1 192.168.1.30 5001
 python3 EV_W.py 192.168.1.10 8000
 
 # PC3 (192.168.1.30):
-python3 EV_Driver.py 192.168.1.10 9092 Driver1
 python3 EV_Registry.py
+python3 EV_Driver.py 192.168.1.10 9092 Driver1
 
 # Front (cualquier navegador):
 front.html?api=http://192.168.1.10:8000
+audit.html?api=http://192.168.1.10:8000
 ```
