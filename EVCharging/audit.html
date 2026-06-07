@@ -1,0 +1,338 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>EVCharging — Audit Log</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: 'Segoe UI', system-ui, sans-serif;
+      background: #0f1117;
+      color: #e2e8f0;
+      min-height: 100vh;
+    }
+
+    header {
+      background: #1a1d27;
+      border-bottom: 1px solid #2d3148;
+      padding: 16px 32px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      position: sticky;
+      top: 0;
+      z-index: 10;
+    }
+
+    header h1 { font-size: 1.2rem; font-weight: 600; color: #a78bfa; letter-spacing: 0.05em; }
+    header span { font-size: 0.8rem; color: #64748b; }
+
+    #status-bar {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 0.78rem;
+    }
+    #status-dot {
+      width: 8px; height: 8px; border-radius: 50%;
+      background: #ef4444;
+      transition: background 0.3s;
+    }
+    #status-dot.connected { background: #22c55e; }
+    #status-text { color: #94a3b8; }
+
+    .toolbar {
+      padding: 16px 32px;
+      display: flex;
+      gap: 12px;
+      flex-wrap: wrap;
+      align-items: center;
+      background: #13151f;
+      border-bottom: 1px solid #1e2130;
+    }
+
+    .toolbar select, .toolbar input {
+      background: #1e2130;
+      border: 1px solid #2d3148;
+      color: #e2e8f0;
+      padding: 7px 12px;
+      border-radius: 6px;
+      font-size: 0.82rem;
+      outline: none;
+    }
+    .toolbar select:focus, .toolbar input:focus { border-color: #7c3aed; }
+    .toolbar input { width: 220px; }
+
+    #count-badge {
+      margin-left: auto;
+      font-size: 0.78rem;
+      color: #64748b;
+    }
+
+    #clear-btn {
+      background: #1e2130;
+      border: 1px solid #2d3148;
+      color: #94a3b8;
+      padding: 7px 14px;
+      border-radius: 6px;
+      font-size: 0.82rem;
+      cursor: pointer;
+    }
+    #clear-btn:hover { border-color: #7c3aed; color: #e2e8f0; }
+
+    .table-wrap {
+      padding: 24px 32px;
+      overflow-x: auto;
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 0.82rem;
+    }
+
+    thead th {
+      text-align: left;
+      padding: 10px 14px;
+      background: #1a1d27;
+      color: #7c3aed;
+      font-weight: 600;
+      letter-spacing: 0.06em;
+      text-transform: uppercase;
+      font-size: 0.72rem;
+      border-bottom: 1px solid #2d3148;
+    }
+
+    tbody tr {
+      border-bottom: 1px solid #1e2130;
+      transition: background 0.15s;
+    }
+    tbody tr:hover { background: #1a1d27; }
+
+    td { padding: 9px 14px; vertical-align: top; }
+
+    td.ts  { color: #64748b; white-space: nowrap; font-family: monospace; }
+    td.src { color: #94a3b8; font-family: monospace; white-space: nowrap; }
+    td.det { color: #cbd5e1; font-family: monospace; word-break: break-all; }
+
+    .badge {
+      display: inline-block;
+      padding: 2px 9px;
+      border-radius: 4px;
+      font-size: 0.72rem;
+      font-weight: 700;
+      letter-spacing: 0.04em;
+      white-space: nowrap;
+    }
+
+    .badge-AUTH_SUCCESS     { background: #14532d; color: #86efac; }
+    .badge-AUTH_FAIL        { background: #7f1d1d; color: #fca5a5; }
+    .badge-AUTH_NEW_CP      { background: #1e3a5f; color: #93c5fd; }
+    .badge-SYSTEM_START     { background: #1e1b4b; color: #a5b4fc; }
+    .badge-KEY_REVOKED      { background: #7c2d12; color: #fdba74; }
+    .badge-CHARGE_END       { background: #064e3b; color: #6ee7b7; }
+    .badge-CHARGE_INTERRUPTED { background: #713f12; color: #fde68a; }
+    .badge-WEATHER_ALERT    { background: #1e3a5f; color: #7dd3fc; }
+    .badge-WEATHER_CANCEL   { background: #1e3a5f; color: #a5f3fc; }
+    .badge-default          { background: #1e2130; color: #94a3b8; }
+
+    #empty-state {
+      text-align: center;
+      padding: 60px;
+      color: #334155;
+      font-size: 0.9rem;
+      display: none;
+    }
+
+    .new-row {
+      animation: flash 1s ease-out;
+    }
+
+    @keyframes flash {
+      0%   { background: #2d1f5e; }
+      100% { background: transparent; }
+    }
+
+    #error-banner {
+      background: #7f1d1d;
+      color: #fca5a5;
+      text-align: center;
+      padding: 10px;
+      font-size: 0.85rem;
+      display: none;
+    }
+  </style>
+</head>
+<body>
+
+<header>
+  <h1>EVCharging &mdash; Security Audit Log</h1>
+  <div id="status-bar">
+    <div id="status-dot"></div>
+    <span id="status-text">Conectando...</span>
+  </div>
+</header>
+
+<div id="error-banner">No se puede conectar con Central. Reintentando...</div>
+
+<div class="toolbar">
+  <select id="filter-action">
+    <option value="">Todos los eventos</option>
+    <option value="SYSTEM_START">SYSTEM_START</option>
+    <option value="AUTH_SUCCESS">AUTH_SUCCESS</option>
+    <option value="AUTH_FAIL">AUTH_FAIL</option>
+    <option value="AUTH_NEW_CP">AUTH_NEW_CP</option>
+    <option value="CHARGE_END">CHARGE_END</option>
+    <option value="CHARGE_INTERRUPTED">CHARGE_INTERRUPTED</option>
+    <option value="KEY_REVOKED">KEY_REVOKED</option>
+    <option value="WEATHER_ALERT">WEATHER_ALERT</option>
+    <option value="WEATHER_CANCEL">WEATHER_CANCEL</option>
+  </select>
+  <input id="filter-text" type="text" placeholder="Buscar en fuente o detalles...">
+  <button id="clear-btn" onclick="clearFilters()">Limpiar filtros</button>
+  <span id="count-badge">0 entradas</span>
+</div>
+
+<div id="error-banner"></div>
+
+<div class="table-wrap">
+  <table id="audit-table">
+    <thead>
+      <tr>
+        <th>Fecha / Hora</th>
+        <th>Evento</th>
+        <th>Fuente</th>
+        <th>Detalles</th>
+      </tr>
+    </thead>
+    <tbody id="audit-body"></tbody>
+  </table>
+  <div id="empty-state">No hay entradas que coincidan con los filtros.</div>
+</div>
+
+<script>
+  const API_BASE = (() => {
+    const p = new URLSearchParams(window.location.search);
+    return (p.get('api') || 'http://localhost:8000').replace(/\/$/, '');
+  })();
+
+  let allEntries = [];
+  let sse = null;
+
+  // ── Badge ──────────────────────────────────────────────────────────────────
+  function badge(action) {
+    const cls = `badge-${action}`;
+    const knownClasses = [
+      'AUTH_SUCCESS','AUTH_FAIL','AUTH_NEW_CP','SYSTEM_START','KEY_REVOKED',
+      'CHARGE_END','CHARGE_INTERRUPTED','WEATHER_ALERT','WEATHER_CANCEL'
+    ];
+    const finalCls = knownClasses.includes(action) ? cls : 'badge-default';
+    return `<span class="badge ${finalCls}">${action}</span>`;
+  }
+
+  // ── Render ─────────────────────────────────────────────────────────────────
+  function buildRow(entry, isNew = false) {
+    const tr = document.createElement('tr');
+    if (isNew) tr.classList.add('new-row');
+    tr.dataset.action = entry.action;
+    tr.dataset.search = `${entry.source} ${entry.details}`.toLowerCase();
+    tr.innerHTML = `
+      <td class="ts">${entry.timestamp}</td>
+      <td>${badge(entry.action)}</td>
+      <td class="src">${entry.source}</td>
+      <td class="det">${entry.details}</td>
+    `;
+    return tr;
+  }
+
+  function applyFilters() {
+    const action = document.getElementById('filter-action').value;
+    const text   = document.getElementById('filter-text').value.toLowerCase();
+    const tbody  = document.getElementById('audit-body');
+    let visible  = 0;
+
+    for (const tr of tbody.querySelectorAll('tr')) {
+      const matchAction = !action || tr.dataset.action === action;
+      const matchText   = !text   || tr.dataset.search.includes(text);
+      const show = matchAction && matchText;
+      tr.style.display = show ? '' : 'none';
+      if (show) visible++;
+    }
+
+    document.getElementById('count-badge').textContent = `${visible} entrada${visible !== 1 ? 's' : ''}`;
+    document.getElementById('empty-state').style.display = visible === 0 ? 'block' : 'none';
+  }
+
+  function clearFilters() {
+    document.getElementById('filter-action').value = '';
+    document.getElementById('filter-text').value   = '';
+    applyFilters();
+  }
+
+  document.getElementById('filter-action').addEventListener('change', applyFilters);
+  document.getElementById('filter-text').addEventListener('input',  applyFilters);
+
+  // ── Carga inicial ──────────────────────────────────────────────────────────
+  async function loadInitial() {
+    try {
+      const res = await fetch(`${API_BASE}/api/audit`);
+      if (!res.ok) throw new Error('HTTP ' + res.status);
+      const json = await res.json();
+      const tbody = document.getElementById('audit-body');
+      tbody.innerHTML = '';
+      allEntries = json.data || [];
+      for (const entry of allEntries) {
+        tbody.appendChild(buildRow(entry));
+      }
+      applyFilters();
+      setStatus(true);
+    } catch (e) {
+      setStatus(false);
+      setTimeout(loadInitial, 3000);
+    }
+  }
+
+  // ── SSE ────────────────────────────────────────────────────────────────────
+  function connectSSE() {
+    if (sse) sse.close();
+
+    sse = new EventSource(`${API_BASE}/api/audit/stream`);
+
+    sse.onopen = () => setStatus(true);
+
+    sse.onmessage = (e) => {
+      let entry;
+      try { entry = JSON.parse(e.data); } catch { return; }
+      if (!entry.action) return;   // ping inicial vacío
+
+      const tbody = document.getElementById('audit-body');
+      const tr = buildRow(entry, true);
+      tbody.appendChild(tr);
+      allEntries.push(entry);
+      applyFilters();
+    };
+
+    sse.onerror = () => {
+      setStatus(false);
+      sse.close();
+      setTimeout(connectSSE, 3000);
+    };
+  }
+
+  // ── Estado de conexión ─────────────────────────────────────────────────────
+  function setStatus(ok) {
+    document.getElementById('status-dot').className = ok ? 'connected' : '';
+    document.getElementById('status-text').textContent = ok ? 'En tiempo real' : 'Sin conexión';
+    const banner = document.getElementById('error-banner');
+    banner.style.display = ok ? 'none' : 'block';
+    banner.textContent = ok ? '' : `No se puede conectar con Central (${API_BASE}). Reintentando...`;
+  }
+
+  // ── Inicio ─────────────────────────────────────────────────────────────────
+  loadInitial();
+  connectSSE();
+</script>
+</body>
+</html>

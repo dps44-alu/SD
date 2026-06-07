@@ -149,3 +149,12 @@
 2026-06-07 13:14:52 | AUTH_SUCCESS         | 127.0.0.1       | cp_id=ALC1 user=cp_ALC1
 2026-06-07 13:15:02 | AUTH_SUCCESS         | 127.0.0.1       | cp_id=ALC1 user=cp_ALC1
 2026-06-07 13:19:25 | AUTH_SUCCESS         | 127.0.0.1       | cp_id=ALC1 user=cp_ALC1
+2026-06-07 13:59:55 | SYSTEM_START         | central         | port=5000 broker=localhost:9092
+2026-06-07 14:00:03 | AUTH_SUCCESS         | 127.0.0.1       | cp_id=ALC1 user=cp_ALC1
+2026-06-07 14:00:08 | AUTH_SUCCESS         | 127.0.0.1       | cp_id=ALC2 user=cp_ALC2
+2026-06-07 14:00:34 | CHARGE_END           | ALC1            | driver=Driver1 kwh=10.00 cost=5.00
+2026-06-07 14:18:02 | CHARGE_END           | ALC1            | driver=Driver1 kwh=10.00 cost=5.00
+2026-06-07 14:18:28 | AUTH_SUCCESS         | 127.0.0.1       | cp_id=ALC1 user=cp_ALC1
+2026-06-07 14:20:13 | SYSTEM_START         | central         | port=5000 broker=localhost:9092
+2026-06-07 14:20:13 | AUTH_SUCCESS         | 127.0.0.1       | cp_id=ALC1 user=cp_ALC1
+2026-06-07 14:20:14 | AUTH_SUCCESS         | 127.0.0.1       | cp_id=ALC2 user=cp_ALC2

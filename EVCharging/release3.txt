@@ -1,0 +1,4 @@
+La práctica para la convocatoria C4 serán las mismas que en la C2 con un añadido.
+Se deberá incluir un API REST que exponga la información de la auditoría de seguridad.
+Se debe inluir un Front Web que acceda a dicha API a través de un navegador y la visualice de manera amigable. 
+Se valorará la actualización en la parte del cliente (navegador Web) en tiempo real.

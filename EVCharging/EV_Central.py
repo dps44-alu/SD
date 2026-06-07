@@ -10,7 +10,7 @@ import os
 import signal
 from cryptography.fernet import Fernet
 
-from flask import Flask, request, jsonify
+from flask import Flask, request, jsonify, Response, stream_with_context
 from flask_cors import CORS
 
 
@@ -1268,6 +1268,85 @@ def health_check():
         "message": "API Central funcionando correctamente",
         "timestamp": time.strftime("%Y-%m-%d %H:%M:%S")
     }), 200
+
+
+def _parse_audit_lines(lines):
+    entries = []
+    for line in lines:
+        line = line.strip()
+        if not line:
+            continue
+        parts = [p.strip() for p in line.split('|')]
+        if len(parts) >= 3:
+            entries.append({
+                "timestamp": parts[0],
+                "action":    parts[1],
+                "source":    parts[2],
+                "details":   parts[3] if len(parts) > 3 else ""
+            })
+    return entries
+
+
+# GET /api/audit
+# Devuelve entradas del log de auditoría. Filtros opcionales: ?action=AUTH_FAIL&source=127.0.0.1&limit=100
+@app.route('/api/audit', methods=['GET'])
+def get_audit():
+    try:
+        action_filter = request.args.get('action', '').strip().upper()
+        source_filter = request.args.get('source', '').strip()
+        limit         = request.args.get('limit', type=int)
+
+        if not os.path.exists(AUDIT_LOG_FILE):
+            return jsonify({"status": "SUCCESS", "data": [], "count": 0}), 200
+
+        with open(AUDIT_LOG_FILE, 'r') as f:
+            entries = _parse_audit_lines(f.readlines())
+
+        if action_filter:
+            entries = [e for e in entries if e['action'] == action_filter]
+        if source_filter:
+            entries = [e for e in entries if source_filter in e['source']]
+        if limit:
+            entries = entries[-limit:]
+
+        return jsonify({"status": "SUCCESS", "data": entries, "count": len(entries)}), 200
+    except Exception as e:
+        return jsonify({"status": "ERROR", "message": str(e)}), 500
+
+
+# GET /api/audit/stream
+# SSE: emite nuevas entradas del log en tiempo real según se van escribiendo
+@app.route('/api/audit/stream', methods=['GET'])
+def stream_audit():
+    def generate():
+        last_size = 0
+        if os.path.exists(AUDIT_LOG_FILE):
+            last_size = os.path.getsize(AUDIT_LOG_FILE)
+        yield "data: {}\n\n"          # ping inicial para abrir la conexión
+        while True:
+            try:
+                time.sleep(1)
+                if not os.path.exists(AUDIT_LOG_FILE):
+                    continue
+                current_size = os.path.getsize(AUDIT_LOG_FILE)
+                if current_size <= last_size:
+                    continue
+                with open(AUDIT_LOG_FILE, 'r') as f:
+                    f.seek(last_size)
+                    new_lines = f.readlines()
+                last_size = current_size
+                for entry in _parse_audit_lines(new_lines):
+                    yield f"data: {json.dumps(entry)}\n\n"
+            except GeneratorExit:
+                break
+            except Exception:
+                pass
+
+    return Response(
+        stream_with_context(generate()),
+        content_type='text/event-stream',
+        headers={'Cache-Control': 'no-cache', 'X-Accel-Buffering': 'no'}
+    )
 
 
 # Ejecuta el servidor Flask para el API REST

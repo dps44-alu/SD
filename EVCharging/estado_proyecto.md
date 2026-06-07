@@ -11,6 +11,7 @@
 | EV_Driver | Kafka | — | Cliente conductor, solicita cargas |
 | EV_W | REST (cliente) | — | Servicio meteorológico, empuja datos a Central |
 | Front | HTML/JS estático | — | Panel web, consume API REST de Central |
+| Audit Front | HTML/JS estático (SSE) | — | Panel web de auditoría, consume API REST de Central |
 
 **Tópicos Kafka:** `peticiones_conductores`, `peticiones_carga`, `consumo_cps`, `respuestas_central`
 
@@ -105,6 +106,26 @@
 | `POST /weather/alert` | ✅ |
 | `POST /weather/data` | ✅ |
 
+### Release 3 — API REST de auditoría
+| Endpoint | Estado |
+|---|---|
+| `GET  /api/audit` | ✅ |
+| `GET  /api/audit?action=<TIPO>` | ✅ |
+| `GET  /api/audit?source=<IP>` | ✅ |
+| `GET  /api/audit?limit=<N>` | ✅ |
+| `GET  /api/audit/stream` (SSE tiempo real) | ✅ |
+
+### Release 3 — Audit Front web
+| Función | Estado |
+|---|---|
+| Historial completo al abrir (`GET /api/audit`) | ✅ |
+| Actualización en tiempo real vía SSE (sin polling) | ✅ |
+| Badges de color por tipo de evento | ✅ |
+| Filtro por tipo de evento (desplegable) | ✅ |
+| Búsqueda libre en fuente y detalles | ✅ |
+| Indicador de conexión + reconexión automática | ✅ |
+| URL `?api=http://...` para despliegue distribuido | ✅ |
+
 ---
 
 ## Estado de pruebas (Release 2)
@@ -119,6 +140,16 @@
 | Prueba 6 | Seguridad: cifrado Kafka y revocación de claves | ✅ Pasada |
 | Prueba 7 | Log de auditoría | ✅ Pasada |
 | Prueba 8 | Resiliencia general (criterios Release 1 con sistema Release 2) | ✅ Pasada |
+
+## Estado de pruebas (Release 3)
+
+| Prueba | Descripción | Estado |
+|---|---|---|
+| Prueba 1 | API REST de auditoría y filtros | ✅ Pasada (local) |
+| Prueba 2 | Audit front: carga inicial y colores | ✅ Pasada (local) |
+| Prueba 3 | Audit front: tiempo real (SSE) | ✅ Pasada (local) |
+| Prueba 4 | Audit front: filtros | ✅ Pasada (local) |
+| Prueba 5 | Audit front: resiliencia y despliegue distribuido | ⏳ Pendiente (sin múltiples equipos) |
 
 ---
 
@@ -160,6 +191,10 @@ EV_W.py        [CENTRAL_IP]  [CENTRAL_API_PORT]
 Front:
   front.html                              (conecta a http://localhost:8000 por defecto)
   front.html?api=http://<IP>:8000         (despliegue distribuido)
+
+Audit Front:
+  audit.html                              (conecta a http://localhost:8000 por defecto)
+  audit.html?api=http://<IP>:8000         (despliegue distribuido)
 ```
 
 ---
@@ -168,7 +203,7 @@ Front:
 
 | Máquina | Componentes |
 |---|---|
-| PC1 | Kafka + EV_Central + Front (front.html) |
+| PC1 | Kafka + EV_Central + Front (front.html + audit.html) |
 | PC2 | EV_CP_E + EV_CP_M + EV_W |
 | PC3 | EV_Driver + EV_Registry |
 
