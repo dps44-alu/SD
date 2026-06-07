@@ -258,6 +258,7 @@ def handle_monitor(conn, addr, producer):
 
             elif msg_type == "KEY_REVOKED":
                 KEY_REVOKED_FLAG = True
+                FERNET = None
                 engine_log("AVISO: Clave revocada por Central — re-autenticate desde el Monitor")
                 conn.sendall(b"OK")
 
@@ -266,8 +267,8 @@ def handle_monitor(conn, addr, producer):
                 driver_id = parts[2]
                 duration = int(parts[3])
 
-                # Verificar que no está manualmente detenido
-                if cp_id == CP_ID and CP_STATUS == "ACTIVE" and not CHARGING_ACTIVE and not MANUALLY_STOPPED:
+                # Verificar que no está manualmente detenido ni con clave revocada
+                if cp_id == CP_ID and CP_STATUS == "ACTIVE" and not CHARGING_ACTIVE and not MANUALLY_STOPPED and not KEY_REVOKED_FLAG:
                     engine_log(f"Carga manual aceptada: {driver_id} | {duration}s")
                     conn.sendall(b"CHARGE_ACCEPTED")
 

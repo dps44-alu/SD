@@ -26,7 +26,7 @@
       z-index: 10;
     }
 
-    header h1 { font-size: 1.2rem; font-weight: 600; color: #a78bfa; letter-spacing: 0.05em; }
+    header h1 { font-size: 1.2rem; font-weight: 600; color: #e2e8f0; letter-spacing: 0.05em; }
     header span { font-size: 0.8rem; color: #64748b; }
 
     #status-bar {
@@ -35,12 +35,6 @@
       gap: 8px;
       font-size: 0.78rem;
     }
-    #status-dot {
-      width: 8px; height: 8px; border-radius: 50%;
-      background: #ef4444;
-      transition: background 0.3s;
-    }
-    #status-dot.connected { background: #22c55e; }
     #status-text { color: #94a3b8; }
 
     .toolbar {
@@ -62,7 +56,7 @@
       font-size: 0.82rem;
       outline: none;
     }
-    .toolbar select:focus, .toolbar input:focus { border-color: #7c3aed; }
+    .toolbar select:focus, .toolbar input:focus { border-color: #64748b; }
     .toolbar input { width: 220px; }
 
     #count-badge {
@@ -80,7 +74,7 @@
       font-size: 0.82rem;
       cursor: pointer;
     }
-    #clear-btn:hover { border-color: #7c3aed; color: #e2e8f0; }
+    #clear-btn:hover { border-color: #64748b; color: #e2e8f0; }
 
     .table-wrap {
       padding: 24px 32px;
@@ -97,7 +91,7 @@
       text-align: left;
       padding: 10px 14px;
       background: #1a1d27;
-      color: #7c3aed;
+      color: #94a3b8;
       font-weight: 600;
       letter-spacing: 0.06em;
       text-transform: uppercase;
@@ -127,16 +121,8 @@
       white-space: nowrap;
     }
 
-    .badge-AUTH_SUCCESS     { background: #14532d; color: #86efac; }
-    .badge-AUTH_FAIL        { background: #7f1d1d; color: #fca5a5; }
-    .badge-AUTH_NEW_CP      { background: #1e3a5f; color: #93c5fd; }
-    .badge-SYSTEM_START     { background: #1e1b4b; color: #a5b4fc; }
-    .badge-KEY_REVOKED      { background: #7c2d12; color: #fdba74; }
-    .badge-CHARGE_END       { background: #064e3b; color: #6ee7b7; }
-    .badge-CHARGE_INTERRUPTED { background: #713f12; color: #fde68a; }
-    .badge-WEATHER_ALERT    { background: #1e3a5f; color: #7dd3fc; }
-    .badge-WEATHER_CANCEL   { background: #1e3a5f; color: #a5f3fc; }
-    .badge-default          { background: #1e2130; color: #94a3b8; }
+    .badge-error   { background: #7f1d1d; color: #fca5a5; }
+    .badge-default { background: #1e2130; color: #94a3b8; }
 
     #empty-state {
       text-align: center;
@@ -151,7 +137,7 @@
     }
 
     @keyframes flash {
-      0%   { background: #2d1f5e; }
+      0%   { background: #252830; }
       100% { background: transparent; }
     }
 
@@ -170,7 +156,6 @@
 <header>
   <h1>EVCharging &mdash; Security Audit Log</h1>
   <div id="status-bar">
-    <div id="status-dot"></div>
     <span id="status-text">Conectando...</span>
   </div>
 </header>
@@ -222,13 +207,9 @@
 
   // ── Badge ──────────────────────────────────────────────────────────────────
   function badge(action) {
-    const cls = `badge-${action}`;
-    const knownClasses = [
-      'AUTH_SUCCESS','AUTH_FAIL','AUTH_NEW_CP','SYSTEM_START','KEY_REVOKED',
-      'CHARGE_END','CHARGE_INTERRUPTED','WEATHER_ALERT','WEATHER_CANCEL'
-    ];
-    const finalCls = knownClasses.includes(action) ? cls : 'badge-default';
-    return `<span class="badge ${finalCls}">${action}</span>`;
+    const errorActions = ['AUTH_FAIL', 'CHARGE_INTERRUPTED', 'KEY_REVOKED', 'WEATHER_ALERT'];
+    const cls = errorActions.includes(action) ? 'badge-error' : 'badge-default';
+    return `<span class="badge ${cls}">${action}</span>`;
   }
 
   // ── Render ─────────────────────────────────────────────────────────────────
@@ -316,7 +297,6 @@
 
   // ── Estado de conexión ─────────────────────────────────────────────────────
   function setStatus(ok) {
-    document.getElementById('status-dot').className = ok ? 'connected' : '';
     document.getElementById('status-text').textContent = ok ? 'En tiempo real' : 'Sin conexión';
     const banner = document.getElementById('error-banner');
     banner.style.display = ok ? 'none' : 'block';

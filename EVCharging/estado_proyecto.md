@@ -44,7 +44,7 @@
 | Tiles CP con colores por estado | ✅ |
 | ACTIVE = verde / BUSY = verde oscuro (cargando) / OUT_OF_ORDER = naranja / BROKEN = rojo / DESCONECTADO = gris | ✅ |
 | Sección ON GOING DRIVERS REQUESTS (conductor, CP, inicio, kWh, €) | ✅ |
-| Sección APPLICATION MESSAGES con colores por tipo y scrollbar | ✅ |
+| Sección APPLICATION MESSAGES con scrollbar | ✅ |
 
 ### Resiliencia (Release 1)
 | Escenario | Estado |
@@ -137,7 +137,7 @@
 |---|---|
 | Historial completo al abrir (`GET /api/audit`) | ✅ |
 | Actualización en tiempo real vía SSE (sin polling) | ✅ |
-| Badges de color por tipo de evento | ✅ |
+| Badges por tipo de evento (errores en rojo, resto en gris) | ✅ |
 | Filtro por tipo de evento (desplegable) | ✅ |
 | Indicador de conexión + reconexión automática | ✅ |
 | URL `?api=http://...` para despliegue distribuido | ✅ |

@@ -251,11 +251,14 @@ class DriverTerminal:
         while self.running:
             try:
                 messages = self.consumer.poll(timeout_ms=500)
-                
+
                 for _, msgs in messages.items():
                     for msg in msgs:
                         self.process_message(msg.value)
-                        
+
+                if messages:
+                    self.consumer.commit()
+
             except Exception as e:
                 print(f"  Error en Kafka: {e}")
                 time.sleep(1)

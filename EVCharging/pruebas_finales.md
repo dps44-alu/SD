@@ -23,11 +23,17 @@ python3 EV_CP_M.py localhost 6001 localhost 5000 ALC2  # Monitor ALC2
   → presiona ENTER → opción 1 → introduce dirección y precio
 python3 EV_W.py                                        # pide API key la primera vez
 python3 EV_Driver.py localhost 9092 Driver1
-# Abrir front.html y audit.html en el navegador
+# Abrir fronts en el navegador (en local el parámetro ?api= no es necesario):
+xdg-open front.html
+xdg-open audit.html
+# Despliegue distribuido (Central en otra máquina):
+# chromium-browser "file:///home/david/Desktop/SD/EVCharging/front.html?api=http://<IP>:8000"
 ```
 
 > **Notas:**
-> - EV_W conecta al puerto **8000** (API REST), NO al 5000 (TCP). Si al arrancar EV_W aparece "Error: el servidor no devuelve JSON", estás usando el puerto incorrecto.
+> - **Registro en cada arranque:** el Monitor siempre muestra el menú de registro al arrancar porque no guarda credenciales entre sesiones (diseño intencional). Si el CP ya existe en Registry, borra la entrada anterior y crea una nueva con credenciales frescas — basta con introducir la misma dirección y precio.
+> - EV_W conecta al puerto **8000** (API REST), NO al 5000 (TCP). Si al arrancar EV_W aparece "Error: el servidor no devuelve JSON", estás usando el puerto TCP equivocado.
+> - El parámetro `?api=` en el front solo es necesario en despliegue distribuido (Central en otra máquina). En local, `xdg-open front.html` ya conecta a `localhost:8000` por defecto.
 > - El archivo `cargas.txt` (12 entradas) se usa para el flujo autónomo — es suficiente para todos los escenarios.
 > - `driver1.txt` tiene solo 3 entradas; úsalo solo si quieres una prueba corta.
 
@@ -280,7 +286,7 @@ python3 EV_Driver.py localhost 9092 Driver1
 ### PRUEBA 4.2 — Alertas climáticas
 
 **Escenario A — Alerta con CP libre:**
-1. Con ALC1 en ACTIVE, desde menú EV_W opción `1` → poner ALC1 en una ciudad con temperatura < 0°C (ej: "Tromsø" o "Yakutsk").
+1. Con ALC1 en ACTIVE, desde menú EV_W opción `1` → poner ALC1 en una ciudad con temperatura < 0°C (ej: "Tromsø" o "Resolute").
 2. **Resultado esperado en ~4s:**
    - Log EV_W: "ALERTA: ALC1 temperatura crítica".
    - Panel Tkinter: ALC1 → naranja (OUT_OF_ORDER).

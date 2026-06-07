@@ -27,7 +27,7 @@
 
         header h1 {
             font-size: 18px;
-            color: #58a6ff;
+            color: #c9d1d9;
             font-weight: 600;
         }
 
@@ -66,9 +66,9 @@
         .summary-item { text-align: center; }
         .summary-item .val { font-size: 28px; font-weight: 700; color: #c9d1d9; }
         .summary-item .lbl { font-size: 11px; color: #8b949e; text-transform: uppercase; letter-spacing: 1px; }
-        .summary-item.active .val { color: #3fb950; }
-        .summary-item.busy   .val { color: #3fb950; }
-        .summary-item.warn   .val { color: #d29922; }
+        .summary-item.active .val { color: #c9d1d9; }
+        .summary-item.busy   .val { color: #c9d1d9; }
+        .summary-item.warn   .val { color: #c9d1d9; }
 
         /* Sections */
         section {
@@ -155,10 +155,10 @@
 
         .msg-line { padding: 2px 0; border-bottom: 1px solid #21262d; }
         .msg-ts   { color: #484f58; margin-right: 6px; }
-        .msg-ok   { color: #3fb950; }
-        .msg-warn { color: #d29922; }
-        .msg-err  { color: #f85149; }
-        .msg-info { color: #8b949e; }
+        .msg-ok   { color: #c9d1d9; }
+        .msg-warn { color: #c9d1d9; }
+        .msg-err  { color: #c9d1d9; }
+        .msg-info { color: #c9d1d9; }
 
         /* Error banner */
         #error-banner {
@@ -189,7 +189,7 @@
 <header>
     <h1>EV Charging Network &mdash; Panel de Control</h1>
     <div class="header-right">
-        <span id="conn-status"><span class="dot dot-gray"></span>Conectando...</span>
+        <span id="conn-status">Conectando...</span>
         <span>Actualizado: <span id="last-update">--:--:--</span></span>
         <span class="api-url" id="api-display"></span>
     </div>
@@ -322,9 +322,7 @@
     }
 
     function connDot(connected) {
-        return connected
-            ? '<span class="dot dot-green"></span>Online'
-            : '<span class="dot dot-red"></span>Offline';
+        return connected ? 'Online' : 'Offline';
     }
 
     function isStale(w) {
@@ -350,9 +348,7 @@
 
     function setConnStatus(ok) {
         const el = document.getElementById('conn-status');
-        el.innerHTML = ok
-            ? '<span class="dot dot-green"></span>Central conectada'
-            : '<span class="dot dot-red"></span>Central no disponible';
+        el.textContent = ok ? 'Central conectada' : 'Central no disponible';
     }
 
     // ── Fetches ────────────────────────────────────────────────────────────

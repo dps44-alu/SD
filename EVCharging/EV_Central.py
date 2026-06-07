@@ -38,6 +38,8 @@ MESSAGE_LOCK = threading.Lock()
 IN_MENU = False
 SHUTDOWN_FLAG = False
 MENU_REFRESH_EVENT = threading.Event()
+_NOTIFY_LOCK = threading.Lock()
+_NOTIFY_SENT = False
 
 CP_KEYS = {}            # {cp_id: Fernet instance}
 CP_KEYS_LOCK = threading.Lock()
@@ -351,28 +353,18 @@ def control_menu_loop():
                 # Parar todos los CPs
                 clear_screen()
                 display_pending_messages()
-                
-                confirm = input("\n  ¿Seguro que deseas parar TODOS los CPs? (s/n): ").strip().lower()
-                if confirm == 's':
-                    print(f"\n  Deteniendo todos los puntos de carga...")
-                    count = stop_all_charging_points()
-                    print(f"  {count} puntos de carga detenidos")
-                else:
-                    print("  Operación cancelada")
+                print(f"\n  Deteniendo todos los puntos de carga...")
+                count = stop_all_charging_points()
+                print(f"  {count} puntos de carga detenidos")
                 input("\n  Presiona ENTER para continuar...")
-                
+
             elif option == "4":
                 # Reanudar todos los CPs
                 clear_screen()
                 display_pending_messages()
-                
-                confirm = input("\n  ¿Seguro que deseas reanudar TODOS los CPs? (s/n): ").strip().lower()
-                if confirm == 's':
-                    print(f"\n  Reanudando todos los puntos de carga...")
-                    count = resume_all_charging_points()
-                    print(f"  {count} puntos de carga reanudados")
-                else:
-                    print("  Operación cancelada")
+                print(f"\n  Reanudando todos los puntos de carga...")
+                count = resume_all_charging_points()
+                print(f"  {count} puntos de carga reanudados")
                 input("\n  Presiona ENTER para continuar...")
                 
             elif option == "5":
@@ -506,7 +498,9 @@ def _cp_tile_content(cp):
     if status == "BUSY":
         text = (f"{cp['id']}\n{cp['address']}\n{cp['price']}€/kWh\n"
                 f"{cp['driver']}\n{cp['kwh_consumed']} kWh\n{cp['money_consumed']}€")
-    elif status in ("OUT_OF_ORDER", "BROKEN"):
+    elif status == "BROKEN":
+        text = f"{cp['id']}\n{cp['address']}\n{cp['price']}€/kWh\nAveriado"
+    elif status == "OUT_OF_ORDER":
         text = f"{cp['id']}\n{cp['address']}\n{cp['price']}€/kWh\nFuera de Servicio"
     else:
         text = f"{cp['id']}\n{cp['address']}\n{cp['price']}€/kWh\n{status}"
@@ -562,7 +556,7 @@ def create_panel():
     _DRV_FRAME, DRIVERS_WIDGET = _make_section(root, "ON GOING DRIVERS REQUESTS", 5)
     _DRV_FRAME.grid(row=bottom_row, column=0, columnspan=cols,
                     padx=4, pady=(8, 2), sticky="ew")
-    DRIVERS_WIDGET.tag_configure("header", foreground="#58a6ff", font=("Consolas", 9, "bold"))
+    DRIVERS_WIDGET.tag_configure("header", foreground="#c9d1d9", font=("Consolas", 9, "bold"))
     DRIVERS_WIDGET.tag_configure("sep",    foreground="#30363d")
     DRIVERS_WIDGET.tag_configure("row",    foreground="#c9d1d9")
     DRIVERS_WIDGET.tag_configure("empty",  foreground="#484f58")
@@ -572,10 +566,10 @@ def create_panel():
     _MSG_FRAME.grid(row=bottom_row + 1, column=0, columnspan=cols,
                     padx=4, pady=(2, 8), sticky="ew")
     MESSAGE_WIDGET.tag_configure("ts",   foreground="#484f58")
-    MESSAGE_WIDGET.tag_configure("ok",   foreground="#3fb950")
-    MESSAGE_WIDGET.tag_configure("warn", foreground="#d29922")
-    MESSAGE_WIDGET.tag_configure("err",  foreground="#f85149")
-    MESSAGE_WIDGET.tag_configure("info", foreground="#8b949e")
+    MESSAGE_WIDGET.tag_configure("ok",   foreground="#c9d1d9")
+    MESSAGE_WIDGET.tag_configure("warn", foreground="#c9d1d9")
+    MESSAGE_WIDGET.tag_configure("err",  foreground="#c9d1d9")
+    MESSAGE_WIDGET.tag_configure("info", foreground="#c9d1d9")
 
     root.after(500, refresh_panel, root)
     root.mainloop()
@@ -741,8 +735,8 @@ def listen_cp_consumption(broker_ip, broker_port):
             if cp and cp["status"] != "BROKEN":
                 if cp_id in PENDING_WEATHER_STOP:
                     PENDING_WEATHER_STOP.discard(cp_id)
-                    update_charging_point(cp_id, "OUT_OF_ORDER")
                     stop_charging_point(cp_id)
+                    update_charging_point(cp_id, "OUT_OF_ORDER")
                     log_message(f"Central: {cp_id} → OUT_OF_ORDER (alerta climática pendiente)")
                 else:
                     with CONNECTIONS_LOCK:
@@ -938,6 +932,10 @@ def handle_monitor_connection(conn, addr):
                     # Never let the Monitor overwrite BROKEN — only STOP/RESUME commands do that
                     if cp["status"] == "BROKEN":
                         continue
+                    # Never let the Monitor replace OUT_OF_ORDER with BROKEN (weather stop: Engine
+                    # reports BROKEN due to MANUALLY_STOPPED, but Central keeps OUT_OF_ORDER)
+                    if cp["status"] == "OUT_OF_ORDER" and cp_status == "BROKEN":
+                        continue
                     # Never let the Monitor reset BUSY to ACTIVE — only CHARGE_END/INTERRUPTED do that
                     if cp["status"] == "BUSY" and cp_status == "ACTIVE":
                         continue
@@ -1016,6 +1014,11 @@ def main(central_port):
 
 # Avisa a los drivers con carga activa que Central se cierra (la carga continúa en el Engine)
 def notify_drivers_on_shutdown():
+    global _NOTIFY_SENT
+    with _NOTIFY_LOCK:
+        if _NOTIFY_SENT:
+            return
+        _NOTIFY_SENT = True
     if not SHARED_PRODUCER:
         return
     cps = list_charging_points()
@@ -1042,9 +1045,11 @@ def notify_drivers_on_shutdown():
 # Manejador de señal para Ctrl+C
 def signal_handler(sig, frame):
     global SHUTDOWN_FLAG
+    if SHUTDOWN_FLAG:
+        return
+    SHUTDOWN_FLAG = True
     print("\n[Central] Señal de interrupción recibida. Cerrando sistema...")
     notify_drivers_on_shutdown()
-    SHUTDOWN_FLAG = True
 
 
 # Endpoint para recibir alertas de EV_W -> {"cp_id": "ALC1", "alert_type": "ALERT|CANCEL", "reason": "..."}
@@ -1074,6 +1079,12 @@ def weather_alert():
                 return jsonify({"status": "SUCCESS", "action": "STOP_PENDING"}), 200
             else:
                 if stop_charging_point(cp_id):
+                    cp_now = get_charging_point(cp_id)
+                    if cp_now:
+                        update_charging_point(cp_id, "OUT_OF_ORDER",
+                                              cp_now.get("driver", ""),
+                                              cp_now.get("kwh_consumed", 0),
+                                              cp_now.get("money_consumed", 0))
                     log_message(f"Central: {cp_id} detenido por alerta climática")
                     return jsonify({"status": "SUCCESS", "action": "CP_STOPPED"}), 200
                 else:

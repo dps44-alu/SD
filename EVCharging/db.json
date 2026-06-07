@@ -1,8 +1,8 @@
 {
     "charging_points": [
         {
-            "id": "ALC1",
-            "address": "c/Alicante 1",
+            "id": "ALC2",
+            "address": "c/ Alicante, 2",
             "price": 0.5,
             "status": "INACTIVE",
             "driver": "",
@@ -10,18 +10,23 @@
             "money_consumed": 0
         },
         {
-            "id": "ALC2",
-            "address": "c/Alicante 2",
-            "price": 0.48,
+            "id": "ALC3",
+            "address": "c/ Alicante, 3",
+            "price": 0.8,
             "status": "INACTIVE",
+            "driver": "",
+            "kwh_consumed": 0,
+            "money_consumed": 0
+        },
+        {
+            "id": "ALC1",
+            "address": "c/ Alicante, 1",
+            "price": 0.6,
+            "status": "ACTIVE",
             "driver": "",
             "kwh_consumed": 0,
             "money_consumed": 0
         }
     ],
-    "drivers": [
-        {
-            "id": "Driver1"
-        }
-    ]
+    "drivers": []
 }

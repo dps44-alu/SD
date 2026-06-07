@@ -4,6 +4,7 @@ import time
 import threading
 import os
 import select
+import json
 
 import requests
 import urllib3
@@ -467,14 +468,34 @@ def request_manual_charge(engine_ip, engine_port):
                 print(f"  Solicitud aceptada")
                 print(f"  La carga comenzará en unos momentos...")
                 print(f"  El conductor {driver_id} verá la carga en su aplicación")
+                time.sleep(2)
             else:
                 print(f"  Solicitud rechazada: {response}")
+                log_message(f"Carga manual rechazada: {response}")
+                input("\n  Presiona ENTER para continuar...")
     except Exception as e:
         print(f"  Error al comunicarse con el Engine: {e}")
-    
-    time.sleep(2)
+        input("\n  Presiona ENTER para continuar...")
 
 
+
+
+def save_local_credentials(cp_id, username, password):
+    data = {"username": username, "password": password,
+            "address": CP_ADDRESS, "price": CP_PRICE}
+    try:
+        with open(f"creds_{cp_id}.json", "w") as f:
+            json.dump(data, f)
+    except Exception as e:
+        print(f"[Monitor] Aviso: no se pudieron guardar credenciales: {e}")
+
+
+def load_local_credentials(cp_id):
+    try:
+        with open(f"creds_{cp_id}.json", "r") as f:
+            return json.load(f)
+    except FileNotFoundError:
+        return None
 
 
 # Registra el CP en EV_Registry vía API REST
@@ -516,7 +537,7 @@ def register_with_registry(registry_url, cp_id, address, price):
         return False, None, None
     
 
-# Muestra menú de registro en Registry y devuelve (success, username, password)
+# Solicita datos de registro y registra el CP en Registry
 def show_registration_menu(cp_id):
     global CP_ADDRESS, CP_PRICE
 
@@ -525,31 +546,22 @@ def show_registration_menu(cp_id):
         print(f"{'='*70}")
         print(f"  REGISTRO EN REGISTRY — CP {cp_id}")
         print(f"{'='*70}")
-        print(f"  1. Registrar este CP en Registry (canal HTTPS seguro)")
-        print(f"  0. Cancelar y salir")
-        print(f"{'='*70}")
+        CP_ADDRESS = input("  Dirección del CP: ").strip()
+        try:
+            CP_PRICE = float(input("  Precio (€/kWh): ").strip())
+        except ValueError:
+            print("  Precio inválido.")
+            input("  Presiona ENTER para continuar...")
+            continue
 
-        option = input("\n  Selecciona opción: ").strip()
-
-        if option == "1":
-            CP_ADDRESS = input("  Dirección del CP: ").strip()
-            try:
-                CP_PRICE = float(input("  Precio (€/kWh): ").strip())
-            except ValueError:
-                print("  Precio inválido.")
-                input("  Presiona ENTER para continuar...")
-                continue
-
-            success, username, password = register_with_registry(
-                REGISTRY_URL, cp_id, CP_ADDRESS, CP_PRICE
-            )
-            if success:
-                return True, username, password
-            print("\n  Error en el registro. Inténtalo de nuevo.")
-            input("\n  Presiona ENTER para continuar...")
-
-        elif option == "0":
-            return False, None, None
+        success, username, password = register_with_registry(
+            REGISTRY_URL, cp_id, CP_ADDRESS, CP_PRICE
+        )
+        if success:
+            save_local_credentials(cp_id, username, password)
+            return True, username, password
+        print("\n  Error en el registro. Inténtalo de nuevo.")
+        input("\n  Presiona ENTER para continuar...")
 
 
 # Intenta reconectar con Central cuando la conexión se pierde
@@ -598,21 +610,25 @@ def reconnect_loop(engine_ip, engine_port, central_ip, central_port, cp_id):
 
 # Función principal
 def main(engine_ip, engine_port, central_ip, central_port, cp_id, registry_ip, registry_port):
-    global CP_ID, RUNNING, CP_USERNAME, CP_PASSWORD, REGISTRY_URL, CENTRAL_CONN
+    global CP_ID, RUNNING, CP_USERNAME, CP_PASSWORD, REGISTRY_URL, CENTRAL_CONN, CP_ADDRESS, CP_PRICE
 
     CP_ID = cp_id
     REGISTRY_URL = f"https://{registry_ip}:{registry_port}"
 
     print(f"[Monitor] Iniciando Monitor para CP: {cp_id}")
-    input("\n  Presiona ENTER para acceder al menú de registro en Registry...")
 
-    success, username, password = show_registration_menu(cp_id)
-    if not success:
-        print("[Monitor] Registro cancelado. Cerrando.")
-        return
-
-    CP_USERNAME = username
-    CP_PASSWORD = password
+    creds = load_local_credentials(cp_id)
+    if creds:
+        CP_USERNAME = creds["username"]
+        CP_PASSWORD = creds["password"]
+        CP_ADDRESS  = creds.get("address", "")
+        CP_PRICE    = creds.get("price", 0.0)
+        print(f"[Monitor] Credenciales locales encontradas. Omitiendo registro.")
+    else:
+        print(f"\n[Monitor] CP {cp_id} no registrado. Introduce los datos de registro:")
+        success, username, password = show_registration_menu(cp_id)
+        CP_USERNAME = username
+        CP_PASSWORD = password
 
     print(f"[Monitor] Enviando configuración al Engine...")
     if not send_config_to_engine(engine_ip, engine_port, cp_id):
@@ -624,8 +640,16 @@ def main(engine_ip, engine_port, central_ip, central_port, cp_id, registry_ip, r
     CENTRAL_CONN = central_conn
 
     if central_conn is None:
-        print(f"[Monitor] Autenticación rechazada por Central.")
-        print(f"[Monitor] Verifica que las credenciales son correctas y que el CP está registrado.")
+        if creds:
+            try:
+                os.remove(f"creds_{cp_id}.json")
+            except Exception:
+                pass
+            print(f"[Monitor] Credenciales almacenadas rechazadas por Central.")
+            print(f"[Monitor] Archivo de credenciales eliminado. Reinicia para re-registrarte.")
+        else:
+            print(f"[Monitor] Autenticación rechazada por Central.")
+            print(f"[Monitor] Verifica que las credenciales son correctas y que el CP está registrado.")
         return
 
     # Hilo de reconexión automática a Central
