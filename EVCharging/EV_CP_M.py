@@ -20,6 +20,7 @@ CURRENT_DRIVER = None
 CHARGING_INFO = {"kwh": 0, "cost": 0}
 RUNNING = True
 PAUSED = False
+DETAILED_MODE = False
 CP_USERNAME = None
 CP_PASSWORD = None
 ENCRYPTION_KEY = None
@@ -63,22 +64,45 @@ def display_monitor_screen():
     last_state = None
 
     while RUNNING:
-        if not PAUSED:
-            with MESSAGE_LOCK:
-                msgs = list(MESSAGE_BUFFER)
+        if PAUSED:
+            time.sleep(0.5)
+            continue
 
-            current_state = (
-                CP_STATUS, CURRENT_DRIVER,
-                CHARGING_INFO['kwh'], CHARGING_INFO['cost'],
-                tuple(msgs)
-            )
+        with MESSAGE_LOCK:
+            msgs = list(MESSAGE_BUFFER)
 
-            if current_state != last_state:
-                last_state = current_state
-                clear_screen()
+        current_state = (
+            CP_STATUS, CURRENT_DRIVER,
+            CHARGING_INFO['kwh'], CHARGING_INFO['cost'],
+            tuple(msgs), DETAILED_MODE
+        )
 
-                status_text, color_text = get_status_display(CP_STATUS)
+        if current_state != last_state:
+            last_state = current_state
+            clear_screen()
 
+            status_text, color_text = get_status_display(CP_STATUS)
+
+            if DETAILED_MODE:
+                print(f"{'='*70}")
+                print(f"  ESTADO DETALLADO - CP {CP_ID}")
+                print(f"{'='*70}")
+                print(f"  ID        : {CP_ID}")
+                print(f"  Dirección : {CP_ADDRESS}")
+                print(f"  Precio    : {CP_PRICE}€/kWh")
+                print(f"  Estado    : {status_text} ({color_text})")
+                print(f"{'─'*70}")
+                if CURRENT_DRIVER:
+                    print(f"  CARGA ACTIVA:")
+                    print(f"    Conductor : {CURRENT_DRIVER}")
+                    print(f"    Consumo   : {CHARGING_INFO['kwh']:.2f} kWh")
+                    print(f"    Importe   : {CHARGING_INFO['cost']:.2f}€")
+                else:
+                    print(f"  Sin carga activa")
+                print(f"{'='*70}")
+                print(f"  Pulsa ENTER para volver al menú principal")
+                print(f"{'='*70}")
+            else:
                 print(f"{'='*70}")
                 print(f"  MONITOR CP - {CP_ID}")
                 print(f"{'='*70}")
@@ -440,21 +464,21 @@ def register_cp_manually():
 
 # Maneja la entrada del usuario de forma no bloqueante
 def handle_user_input(engine_ip, engine_port):
-    global RUNNING, CP_ID, PAUSED
-    
+    global RUNNING, CP_ID, PAUSED, DETAILED_MODE
+
     while RUNNING:
         try:
             user_input = input()
-            
-            if user_input.strip() == "1":
+
+            if DETAILED_MODE:
+                DETAILED_MODE = False
+            elif user_input.strip() == "1":
                 PAUSED = True
                 request_manual_charge(engine_ip, engine_port)
                 PAUSED = False
             elif user_input.strip() == "2":
-                PAUSED = True
-                show_detailed_status(engine_ip, engine_port)
-                PAUSED = False
-            elif user_input.strip() == "3":  
+                DETAILED_MODE = True
+            elif user_input.strip() == "3":
                 PAUSED = True
                 register_cp_manually()
                 PAUSED = False
@@ -464,7 +488,7 @@ def handle_user_input(engine_ip, engine_port):
                 print(f"\n[Monitor] Cerrando Monitor...")
                 RUNNING = False
                 break
-                
+
         except KeyboardInterrupt:
             print(f"\n\n[Monitor] Interrupción detectada. Cerrando...")
             RUNNING = False
@@ -541,67 +565,6 @@ def request_manual_charge(engine_ip, engine_port):
     time.sleep(2)
 
 
-# Muestra el estado detallado con actualización en tiempo real
-def show_detailed_status(engine_ip, engine_port):
-    global CP_ID, CP_ADDRESS, CP_PRICE, CP_STATUS, CURRENT_DRIVER, CHARGING_INFO, PAUSED
-    
-    import select
-    import sys
-    
-    print("\n  Presiona ENTER para volver al menú principal...")
-    print("  (La pantalla se actualizará automáticamente mientras tanto)\n")
-    time.sleep(1)
-    
-    running = True
-    
-    while running and PAUSED:
-        clear_screen()
-        print(f"\n{'='*70}")
-        print(f"  ESTADO DETALLADO - CP {CP_ID}")
-        print(f"{'='*70}")
-        print(f"  ID: {CP_ID}")
-        print(f"  Dirección: {CP_ADDRESS}")
-        print(f"  Precio: {CP_PRICE}€/kWh")
-        
-        status_text, color_text = get_status_display(CP_STATUS)
-        print(f"  Estado actual: {status_text} ({color_text})")
-        
-        if CURRENT_DRIVER:
-            print(f"\n  CARGA ACTIVA:")
-            print(f"  {'-'*66}")
-            print(f"     Conductor: {CURRENT_DRIVER}")
-            print(f"     Consumo actual: {CHARGING_INFO['kwh']:.2f} kWh")
-            print(f"     Importe acumulado: {CHARGING_INFO['cost']:.2f}€")
-            print(f"  {'-'*66}")
-        else:
-            print(f"\n  Sin carga activa")
-        
-        print(f"\n  CONEXIÓN ENGINE:")
-        print(f"  {'-'*66}")
-        print(f"     IP: {engine_ip}")
-        print(f"     Puerto: {engine_port}")
-        
-        try:
-            with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as client:
-                client.settimeout(2)
-                client.connect((engine_ip, engine_port))
-                print(f"     Estado: CONEXIÓN ACTIVA")
-        except Exception as e:
-            print(f"     Estado: ERROR DE CONEXIÓN")
-        
-        print(f"  {'-'*66}")
-        print(f"{'='*70}")
-        print(f"\n  Esta pantalla se actualiza cada segundo")
-        print(f"  Presiona ENTER para volver al menú principal")
-        print(f"{'='*70}\n")
-        
-        i, o, e = select.select([sys.stdin], [], [], 0)
-        if i:
-            line = sys.stdin.readline()
-            running = False
-        
-        if running:
-            time.sleep(1)
 
 
 def save_local_credentials(cp_id, username, password):

@@ -133,3 +133,19 @@
 2026-06-06 21:46:22 | WEATHER_ALERT        | EV_W            | cp_id=ALC1 reason=Temperatura bajo 0°C
 2026-06-06 21:46:40 | CHARGE_END           | ALC1            | driver=Driver1 kwh=30.00 cost=15.00
 2026-06-06 21:47:00 | WEATHER_CANCEL       | EV_W            | cp_id=ALC1
+2026-06-07 12:06:19 | SYSTEM_START         | central         | port=5000 broker=localhost:9092
+2026-06-07 12:07:29 | AUTH_SUCCESS         | 127.0.0.1       | cp_id=ALC1 user=cp_ALC1
+2026-06-07 12:09:34 | AUTH_SUCCESS         | 127.0.0.1       | cp_id=ALC2 user=cp_ALC2
+2026-06-07 12:48:29 | CHARGE_END           | ALC1            | driver=Driver1 kwh=30.00 cost=15.00
+2026-06-07 12:51:45 | KEY_REVOKED          | central_menu    | cp_id=ALC1
+2026-06-07 12:58:35 | KEY_REVOKED          | central_menu    | cp_id=ALC2
+2026-06-07 12:58:53 | AUTH_SUCCESS         | 127.0.0.1       | cp_id=ALC2 user=cp_ALC2
+2026-06-07 12:59:21 | CHARGE_END           | ALC2            | driver=Driver1 kwh=10.00 cost=4.80
+2026-06-07 13:06:16 | AUTH_SUCCESS         | 127.0.0.1       | cp_id=ALC1 user=cp_ALC1
+2026-06-07 13:07:06 | AUTH_SUCCESS         | 127.0.0.1       | cp_id=ALC1 user=cp_ALC1
+2026-06-07 13:09:31 | AUTH_SUCCESS         | 127.0.0.1       | cp_id=ALC1 user=cp_ALC1
+2026-06-07 13:10:08 | SYSTEM_START         | central         | port=5000 broker=localhost:9092
+2026-06-07 13:10:20 | AUTH_SUCCESS         | 127.0.0.1       | cp_id=ALC1 user=cp_ALC1
+2026-06-07 13:14:52 | AUTH_SUCCESS         | 127.0.0.1       | cp_id=ALC1 user=cp_ALC1
+2026-06-07 13:15:02 | AUTH_SUCCESS         | 127.0.0.1       | cp_id=ALC1 user=cp_ALC1
+2026-06-07 13:19:25 | AUTH_SUCCESS         | 127.0.0.1       | cp_id=ALC1 user=cp_ALC1

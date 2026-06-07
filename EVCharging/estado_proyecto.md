@@ -115,10 +115,10 @@
 | Prueba 2 | Front: múltiples navegadores, estado completo | ✅ Pasada |
 | Prueba 3 | Front: resiliencia (Central caída, EV_W caído) | ✅ Pasada |
 | Prueba 4 | EV_W: alertas climáticas y cambio de localización en caliente | ✅ Pasada |
-| Prueba 5 | Seguridad: Registry HTTPS | ⏳ Pendiente |
-| Prueba 6 | Seguridad: cifrado Kafka y revocación de claves | ⏳ Pendiente |
-| Prueba 7 | Log de auditoría | ⏳ Pendiente |
-| Prueba 8 | Resiliencia general (criterios Release 1 con sistema Release 2) | ⏳ Pendiente |
+| Prueba 5 | Seguridad: Registry HTTPS | ✅ Pasada |
+| Prueba 6 | Seguridad: cifrado Kafka y revocación de claves | ✅ Pasada |
+| Prueba 7 | Log de auditoría | ✅ Pasada |
+| Prueba 8 | Resiliencia general (criterios Release 1 con sistema Release 2) | ✅ Pasada |
 
 ---
 

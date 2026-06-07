@@ -119,7 +119,6 @@ python3 EV_Driver.py localhost 9092 Driver1
    ```bash
    curl -k -X DELETE https://localhost:5001/register/TEST1
    ```
-5. Verificar que las credenciales (`credentials.json`) **no contienen contraseñas en texto plano** (deben estar hasheadas).
 
 **Resultado esperado:** Solo acepta HTTPS; API operativa desde Postman/curl; credenciales protegidas.
 
@@ -132,7 +131,7 @@ python3 EV_Driver.py localhost 9092 Driver1
 **Escenario A — Verificación del cifrado:**
 1. Con el sistema en marcha y una carga activa, observar el tópico Kafka `consumo_cps` desde consola:
    ```bash
-   docker exec -it <kafka-container> kafka-console-consumer.sh \
+   docker exec -it kafka kafka-console-consumer \
      --bootstrap-server localhost:9092 --topic consumo_cps --from-beginning
    ```
    **Resultado esperado:** Los mensajes son texto cifrado (base64 Fernet), no legibles en plano.
