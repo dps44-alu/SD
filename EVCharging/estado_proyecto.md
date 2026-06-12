@@ -151,7 +151,7 @@
 | `AUTH_NEW_CP` audit event | No se distingue primer registro de re-autenticación en el log (ambos producen `AUTH_SUCCESS`) | Bajo |
 | `driver1.txt` con solo 3 entradas | La guía R1 exige ≥10 servicios en el fichero. Usar `cargas.txt` (12 entradas) para las pruebas | Bajo |
 | STX/ETX/LRC | Protocolo de framing opcional; no implementado | Sin penalización |
-| Despliegue en 3 máquinas | Pendiente de verificación en laboratorio | — |
+| Despliegue en 3 máquinas | Verificado en laboratorio — funciona correctamente | ✅ |
 
 ---
 

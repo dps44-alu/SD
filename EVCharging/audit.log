@@ -183,3 +183,22 @@
 2026-06-08 01:15:03 | SYSTEM_START         | central         | port=5000 broker=localhost:9092
 2026-06-08 01:15:05 | AUTH_SUCCESS         | 127.0.0.1       | cp_id=ALC1 user=cp_ALC1
 2026-06-08 01:15:07 | CHARGE_END           | ALC1            | driver=Driver1 kwh=10.00 cost=6.00
+2026-06-12 21:24:26 | SYSTEM_START         | central         | port=5000 broker=localhost:9092
+2026-06-12 21:25:50 | AUTH_SUCCESS         | 127.0.0.1       | cp_id=ALC1 user=cp_ALC1
+2026-06-12 21:26:42 | CHARGE_INTERRUPTED   | ALC1            | driver=Driver1 kwh=7.00 cost=4.20
+2026-06-12 21:33:24 | CP_DISCONNECTED      | ALC1            | Monitor desconectado
+2026-06-12 21:33:26 | AUTH_SUCCESS         | 127.0.0.1       | cp_id=ALC1 user=cp_ALC1
+2026-06-12 21:33:45 | CHARGE_INTERRUPTED   | ALC1            | driver=Driver1 kwh=7.00 cost=4.20
+2026-06-12 21:34:13 | CP_DISCONNECTED      | ALC1            | Monitor desconectado
+2026-06-12 21:40:33 | SYSTEM_START         | central         | port=5000 broker=localhost:9092
+2026-06-12 21:40:37 | AUTH_SUCCESS         | 127.0.0.1       | cp_id=ALC1 user=cp_ALC1
+2026-06-12 21:40:56 | CHARGE_INTERRUPTED   | ALC1            | driver=Driver1 kwh=8.00 cost=4.80
+2026-06-12 21:41:17 | CP_DISCONNECTED      | ALC1            | Monitor desconectado
+2026-06-12 23:15:58 | SYSTEM_START         | central         | port=5000 broker=localhost:9092
+2026-06-12 23:16:05 | AUTH_SUCCESS         | 127.0.0.1       | cp_id=ALC1 user=cp_ALC1
+2026-06-12 23:17:21 | CHARGE_END           | ALC1            | driver=Driver1 kwh=10.00 cost=6.00
+2026-06-12 23:18:40 | CP_DISCONNECTED      | ALC1            | Monitor desconectado
+2026-06-12 23:23:00 | SYSTEM_START         | central         | port=5000 broker=localhost:9092
+2026-06-12 23:25:33 | SYSTEM_START         | central         | port=5000 broker=localhost:9092
+2026-06-12 23:25:56 | AUTH_SUCCESS         | 127.0.0.1       | cp_id=ALC1 user=cp_ALC1
+2026-06-12 23:26:12 | CP_DISCONNECTED      | ALC1            | Monitor desconectado

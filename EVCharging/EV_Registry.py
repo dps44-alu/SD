@@ -8,15 +8,16 @@ import os
 app = Flask(__name__)
 
 
-REGISTRY_DB = "db.json"
-CREDENTIALS_FILE = "credentials.json"
-DB_LOCK = threading.Lock()
+REGISTRY_DB = "db.json"                     # db.json es compartido con EV_Central
+CREDENTIALS_FILE = "credentials.json"       # Para custodiar las contraseñas generadas, el Monitor las guarda en memoria
+DB_LOCK = threading.Lock()                  # Mutex para evitar escrituras concurrentes sobre db.json desde Flask
 
 
 def load_credentials():
     try:
         with open(CREDENTIALS_FILE, "r") as f:
             return json.load(f)
+        
     except FileNotFoundError:
         return {}
 
@@ -26,11 +27,13 @@ def save_credentials(creds):
         json.dump(creds, f, indent=4)
 
 
+# Lee los CPs de db.json y escribe cada entrada con sus credenciales desde credentials.json
 def load_registry():
     with DB_LOCK:
         try:
             with open(REGISTRY_DB, "r") as f:
                 data = json.load(f)
+
             creds = load_credentials()
             return {
                 "registered_cps": [
@@ -53,11 +56,13 @@ def save_registry(registry_data):
         try:
             with open(REGISTRY_DB, "r") as f:
                 db = json.load(f)
+
         except FileNotFoundError:
             db = {"charging_points": [], "drivers": []}
 
         existing = {cp["id"]: cp for cp in db.get("charging_points", [])}
 
+        # Al actualizar la lista de CPs se conservan los campos de Centra, Registry solo es responsable de id/address/price
         db["charging_points"] = [
             {
                 "id": cp["id"],
@@ -73,9 +78,9 @@ def save_registry(registry_data):
 
         with open(REGISTRY_DB, "w") as f:
             json.dump(db, f, indent=4)
-            
 
-# POST /register - Registrar un nuevo CP
+
+# POST /register    :   Registrar un nuevo CP
 @app.route('/register', methods=['POST'])
 def register_cp():
     data = request.json
@@ -88,12 +93,13 @@ def register_cp():
 
     registry = load_registry()
 
+    # Impedir doble registro del mismo ID
     for cp in registry["registered_cps"]:
         if cp["id"] == cp_id:
             return jsonify({"status": "ERROR", "message": "CP ya registrado"}), 409
 
     username = f"cp_{cp_id}"
-    password = secrets.token_urlsafe(16)
+    password = secrets.token_urlsafe(16)    # Se devuelve al Monitor en esta respuesta y nunca más se vuelve a exponer
 
     registry["registered_cps"].append({
         "id": cp_id,
@@ -118,11 +124,11 @@ def register_cp():
     }), 201
 
 
-# DELETE /register/<cp_id> - Dar de baja un CP
+# DELETE /register/<cp_id>  :   Dar de baja un CP
 @app.route('/register/<cp_id>', methods=['DELETE'])
 def unregister_cp(cp_id):
     registry = load_registry()
-    
+
     # Buscar y eliminar
     found = False
     for i, cp in enumerate(registry["registered_cps"]):
@@ -130,21 +136,21 @@ def unregister_cp(cp_id):
             registry["registered_cps"].pop(i)
             found = True
             break
-    
+
     if not found:
         return jsonify({"status": "ERROR", "message": "CP no encontrado"}), 404
-    
+
     save_registry(registry)
     print(f"[Registry] CP {cp_id} dado de baja")
-    
+
     return jsonify({"status": "SUCCESS"}), 200
 
 
-# GET /register/<cp_id> - Consultar si un CP estÃ¡ registrado
+# GET /register/<cp_id> :   Consultar si un CP está registrado
 @app.route('/register/<cp_id>', methods=['GET'])
 def check_cp(cp_id):
     registry = load_registry()
-    
+
     for cp in registry["registered_cps"]:
         if cp["id"] == cp_id:
             return jsonify({
@@ -153,7 +159,7 @@ def check_cp(cp_id):
                 "address": cp["address"],
                 "price": cp["price"]
             }), 200
-    
+
     return jsonify({"status": "NOT_FOUND"}), 404
 
 
@@ -165,6 +171,7 @@ if __name__ == "__main__":
         print("openssl req -x509 -newkey rsa:4096 -nodes -out cert.pem -keyout key.pem -days 365")
         print("[Registry] Iniciando sin SSL (solo para desarrollo)")
         app.run(host='0.0.0.0', port=5001, debug=False)
+        
     else:
         print("[Registry] Iniciando con SSL en puerto 5001")
         app.run(host='0.0.0.0', port=5001, ssl_context=('cert.pem', 'key.pem'), debug=False)
