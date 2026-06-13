@@ -1,0 +1,242 @@
+========================================================================
+  GUIA DE EJECUCION -- EVCharging Network
+========================================================================
+
+
+========================================================================
+  REQUISITOS PREVIOS
+========================================================================
+
+Python (paquetes):
+  pip install kafka-python cryptography flask flask-cors requests urllib3
+
+Docker (Kafka + Zookeeper):
+  docker compose up -d
+
+  El docker-compose.yml levanta Zookeeper en el puerto 2181 y Kafka
+  en el 9092. Esperar ~10 segundos antes de arrancar los modulos Python.
+
+
+========================================================================
+  ARCHIVOS DE CONFIGURACION
+========================================================================
+
+  Archivo              Proposito                          Auto-creado
+  -------              ---------                          -----------
+  db.json              Estado de CPs y drivers            Si (Registry/Central)
+  credentials.json     Credenciales generadas por Registry Si (Registry)
+  creds_<CP_ID>.json   Credenciales locales del Monitor   Si (Monitor, 1a vez)
+  ev_w_config.json     API key de OpenWeather             Si (EV_W, 1a vez)
+  locations.txt        CP -> ciudad para EV_W             MANUAL (ver formato)
+  cargas.txt           Cargas en lote para EV_Driver      MANUAL (ver formato)
+  audit.log            Log de auditoria                   Si (Central)
+
+Formato de locations.txt (una entrada por linea):
+  ALC1,Alicante
+  ALC2,Madrid
+
+Formato de cargas.txt (un CP_ID por linea):
+  ALC1
+  ALC2
+  ALC1
+  ...
+
+
+========================================================================
+  EJECUCION EN UNA SOLA MAQUINA (localhost)
+========================================================================
+
+Abrir UNA TERMINAL POR MODULO en el orden indicado:
+
+--- 1. Kafka ---
+  docker compose up -d
+
+--- 2. EV_Registry ---
+  python3 EV_Registry.py
+  (Escucha en 0.0.0.0:5001, HTTPS con certificado autofirmado)
+
+--- 3. EV_Central ---
+  python3 EV_Central.py
+  python3 EV_Central.py 5000 localhost 9092   <- con parametros
+  (TCP en :5000 | REST en :8000 | Panel Tkinter en ventana aparte)
+
+--- 4. EV_CP_E (Engine) ---
+  python3 EV_CP_E.py
+  python3 EV_CP_E.py localhost 9092 6000      <- con parametros
+
+--- 5. EV_CP_M (Monitor) ---
+  python3 EV_CP_M.py
+  python3 EV_CP_M.py localhost 6000 localhost 5000 ALC1 localhost 5001
+  La primera vez pedira direccion y precio €/kWh y registrara el CP.
+  Las siguientes veces usara creds_ALC1.json y saltara el registro.
+
+--- 6. EV_W (opcional -- meteorologia) ---
+  python3 EV_W.py
+  python3 EV_W.py localhost 8000              <- con parametros
+  La primera vez pedira la API key de OpenWeather (se guarda en
+  ev_w_config.json). Necesita locations.txt con al menos una entrada.
+
+--- 7. EV_Driver ---
+  python3 EV_Driver.py
+  python3 EV_Driver.py localhost 9092 Driver1 <- con parametros
+
+--- 8. Front web (navegador) ---
+  Abrir front.html en el navegador
+  o bien: front.html?api=http://localhost:8000
+
+--- 9. Audit Front (navegador) ---
+  Abrir audit.html en el navegador
+  o bien: audit.html?api=http://localhost:8000
+
+
+========================================================================
+  EJECUCION DISTRIBUIDA (3 MAQUINAS)
+========================================================================
+
+  Maquina   IP ejemplo      Componentes
+  -------   ----------      -----------
+  PC1       192.168.1.10    Kafka + EV_Central + Fronts
+  PC2       192.168.1.20    EV_CP_E + EV_CP_M + EV_W
+  PC3       192.168.1.30    EV_Registry + EV_Driver
+
+  IMPORTANTE: editar docker-compose.yml en PC1 antes de arrancar Kafka:
+    KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://192.168.1.10:9092
+
+PC1:
+  docker compose up -d
+  python3 EV_Central.py 5000 192.168.1.10 9092
+
+PC2:
+  python3 EV_CP_E.py 192.168.1.10 9092 6000
+  python3 EV_CP_M.py localhost 6000 192.168.1.10 5000 ALC1 192.168.1.30 5001
+  python3 EV_W.py 192.168.1.10 8000
+
+PC3:
+  python3 EV_Registry.py
+  python3 EV_Driver.py 192.168.1.10 9092 Driver1
+
+Fronts (cualquier navegador):
+  front.html?api=http://192.168.1.10:8000
+  audit.html?api=http://192.168.1.10:8000
+
+
+========================================================================
+  MENUS DE CADA MODULO
+========================================================================
+
+EV_Central (consola):
+  1: Parar CP especifico       2: Reanudar CP especifico
+  3: Parar TODOS               4: Reanudar TODOS
+  5: Ver estado CPs            6: Refrescar mensajes
+  7: Revocar clave de un CP    8: Ver audit.log
+  0: Salir
+
+EV_CP_M (Monitor):
+  1: Carga manual   2: Re-registrar en Registry   3: Re-autenticar   0: Salir
+
+EV_W:
+  1: Anadir / cambiar localizacion   2: Ver estado actual   0: Salir
+
+EV_Driver:
+  1: Solicitar carga manual   2: Ver CPs disponibles   3: Cargar desde archivo   0: Salir
+
+
+========================================================================
+  ESCENARIOS DE PRUEBA HABITUALES
+========================================================================
+
+-- Flujo basico de carga --
+  1. Arrancar en orden: Kafka > Registry > Central > Engine > Monitor > Driver
+  2. EV_Driver opcion 1 -> introducir ALC1 y duracion 10
+  3. Observar en panel Tkinter como el CP pasa a BUSY y luego a ACTIVE
+  4. El Driver recibe el TICKET con kWh y coste
+
+-- Carga desde archivo --
+  EV_Driver opcion 3 -> seleccionar cargas.txt (12 entradas, ALC1 y ALC2)
+
+-- STOP y RESUME desde Central --
+  Central opcion 1 -> ID del CP -> CP pasa a BROKEN (rojo)
+  Central opcion 2 -> mismo ID  -> vuelve a ACTIVE (verde)
+
+-- Carga manual desde Monitor --
+  Monitor opcion 1 -> introducir conductor y duracion
+  La carga se inicia directamente en el Engine sin pasar por Kafka
+
+-- Alerta climatica (EV_W) --
+  EV_W detecta temperatura < 0 C y envia ALERT a Central
+  Central manda STOP al CP -> pasa a OUT_OF_ORDER (naranja)
+  Si el CP estaba en carga, la termina antes de parar
+  Al subir la temperatura >= 0 C, Central envia RESUME -> ACTIVE
+
+-- Revocacion de clave --
+  Central opcion 7 -> ID del CP -> clave Fernet invalidada
+  Monitor y Engine muestran banner de clave revocada
+  Monitor opcion 3 -> re-autenticacion -> nueva clave distribuida
+
+-- Simular caida del Engine --
+  En la terminal del Engine pulsar ENTER
+  CP pasa a OUT_OF_ORDER durante 3 s y se recupera solo
+
+-- Resiliencia: caida del Monitor --
+  Cerrar la terminal del Monitor
+  Panel Central -> CP pasa a DESCONECTADO (gris)
+  Las cargas en curso continuan en el Engine
+  Reiniciar Monitor -> reconecta automaticamente -> CP vuelve a ACTIVE
+
+-- Resiliencia: caida de Central --
+  Cerrar Central y relanzarla
+  Monitor reconecta automaticamente al detectar la caida
+  El Engine reenvía el ultimo CHARGE_END con la nueva clave
+
+
+========================================================================
+  PARAMETROS DE ARRANQUE -- REFERENCIA RAPIDA
+========================================================================
+
+EV_Registry.py
+  (sin parametros -- HTTPS en 0.0.0.0:5001)
+
+EV_Central.py  [CENTRAL_PORT]  [BROKER_IP]  [BROKER_PORT]
+               5000             localhost     9092
+
+EV_CP_E.py     [BROKER_IP]  [BROKER_PORT]  [ENGINE_PORT]
+               localhost     9092           6000
+
+EV_CP_M.py     [ENGINE_IP]  [ENGINE_PORT]  [CENTRAL_IP]  [CENTRAL_PORT]  [CP_ID]  [REGISTRY_IP]  [REGISTRY_PORT]
+               localhost     6000           localhost      5000            ALC1     localhost       5001
+
+EV_Driver.py   [BROKER_IP]  [BROKER_PORT]  [DRIVER_ID]
+               localhost     9092           Driver1
+
+EV_W.py        [CENTRAL_IP]  [CENTRAL_API_PORT]
+               localhost      8000
+               ATENCION: CENTRAL_API_PORT = puerto REST (8000), NO el TCP (5000)
+
+
+========================================================================
+  TABLA DE ESTADOS DEL CP
+========================================================================
+
+  Estado        Color panel      Significado
+  ------        -----------      -----------
+  ACTIVE        Verde            Listo para cargar
+  BUSY          Verde oscuro     Carga en curso
+  OUT_OF_ORDER  Naranja          Fallo temporal o alerta climatica
+  BROKEN        Rojo             Detenido por comando STOP de Central
+  INACTIVE      Gris             Monitor conectado pero CP no disponible
+  DESCONECTADO  Gris             Monitor caido
+
+
+========================================================================
+  PROBLEMAS FRECUENTES
+========================================================================
+
+  Sintoma                        Causa probable                  Solucion
+  -------                        --------------                  --------
+  NoBrokersAvailable al arrancar Kafka aun no esta listo         Esperar 10 s tras docker compose up -d
+  Monitor rechazado por Central  credentials.json no coincide    Borrar creds_<ID>.json y reiniciar Monitor
+  EV_W no encuentra localizacion locations.txt ausente o vacio   Crear archivo con formato CP_ID,Ciudad
+  Panel Tkinter no aparece       Sin display grafico             Usar entorno de escritorio o DISPLAY=:0
+  InsecureRequestWarning visible Certificado autofirmado         Normal; suprimido en el codigo
+
+========================================================================

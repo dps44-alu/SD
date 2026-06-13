@@ -7,6 +7,7 @@ from kafka import KafkaProducer
 from cryptography.fernet import Fernet
 
 
+# Estado global del CP 
 ENGINE_IP = "0.0.0.0"
 ENGINE_PORT = 6000
 CP_STATUS = "ACTIVE"
@@ -19,11 +20,11 @@ CONFIG_RECEIVED = False
 CURRENT_KWH = 0.0
 CURRENT_COST = 0.0
 STOP_CHARGE = False
-MANUALLY_STOPPED = False
-CHARGE_LOCK = threading.Lock()
+MANUALLY_STOPPED = False        # Diferencia un STOP de Central de otros para que el CP no vuelva a ACTIVE automáticamente
+CHARGE_LOCK = threading.Lock()  # Protege CHARGING_ACTIVE y STOP_CHARGE contra handle_charging y los comandos que llegan de Monitor
 FERNET = None
 KEY_REVOKED_FLAG = False
-LAST_CHARGE_END = None
+LAST_CHARGE_END = None          # Guarda el último mensaje de fin de carga para reenvíarlo al reconectar si Central cae
 
 ENGINE_MESSAGES = []
 ENGINE_MESSAGES_LOCK = threading.Lock()
@@ -41,6 +42,7 @@ def engine_log(msg):
 
 
 def display_engine_screen():
+    # Solo redibuja si el estado cambió
     last_state = None
     while True:
         with ENGINE_MESSAGES_LOCK:
@@ -63,14 +65,17 @@ def display_engine_screen():
             print(f"  Estado : {CP_STATUS}")
             if CHARGING_ACTIVE and CURRENT_DRIVER:
                 print(f"  Carga  : {CURRENT_DRIVER} | {CURRENT_KWH:.2f} kWh | {CURRENT_COST:.2f}€")
+
             else:
                 print(f"  Carga  : Sin carga activa")
+
             print(f"{'─'*60}")
 
             if msgs:
                 print(f"  MENSAJES:")
                 for m in msgs[-10:]:
                     print(f"  {m}")
+
             else:
                 print(f"  (sin mensajes)")
 
@@ -94,17 +99,21 @@ def args():
     return broker_ip, broker_port, engine_port
 
 
+# Envía mensaje cifrado si hay clave
 def kafka_send(producer, topic, message):
-    """Send message encrypted if key is available, else plain."""
     if FERNET and CP_ID:
         token = FERNET.encrypt(message.encode()).decode()
         payload = f"{CP_ID}#{token}"
+
     else:
-        payload = message
+        payload = message               # Sin clave se envía sin cifrar y Central lo marcará como "mensaje no comprensible" si ya espera cifrado
+
     producer.send(topic, payload)
     producer.flush()
 
 
+# Simula un fallo y el Engine pasa a OUT_OF_ORDER y se recupera solo
+# No actúa si el CP ya está detenido por Central (BROKEN)
 def simulate_failure():
     global CP_STATUS, MANUALLY_STOPPED
     if not MANUALLY_STOPPED:
@@ -120,6 +129,7 @@ def listen_keyboard():
         input()
         if not MANUALLY_STOPPED:
             threading.Thread(target=simulate_failure, daemon=True).start()
+
         else:
             engine_log("ENTER ignorado — CP detenido por Central (BROKEN)")
 
@@ -131,20 +141,20 @@ def handle_charging(producer, driver_id, cp_id, duration):
         CHARGING_ACTIVE = True
         CURRENT_DRIVER = driver_id
         STOP_CHARGE = False
-        LAST_CHARGE_END = None          # Nueva carga: descartar CHARGE_END anterior
-    
+        LAST_CHARGE_END = None          # Nueva carga que descarta el CHARGE_END anterior
+
     total_kwh = 0
     total_cost = 0
-    
+
     engine_log(f"Iniciando carga: {driver_id} | {duration}s | {CP_PRICE}€/kWh")
-    
+
     # Solo cambiar a BUSY si no está manualmente detenido
     if not MANUALLY_STOPPED:
         CP_STATUS = "BUSY"
-    
+
     charge_interrupted = False
     interruption_reason = ""
-    
+
     for i in range(duration):
         # Verificar condiciones de parada
         with CHARGE_LOCK:
@@ -160,51 +170,55 @@ def handle_charging(producer, driver_id, cp_id, duration):
             engine_log(f"Carga interrumpida: {interruption_reason}")
             break
 
+        # OUT_OF_ORDER por fallo temporal solo corta la carga si es un fallo real del Engine
         if CP_STATUS in ["OUT_OF_ORDER", "BROKEN"] and not MANUALLY_STOPPED:
             charge_interrupted = True
             interruption_reason = "avería del CP"
             engine_log(f"Carga interrumpida: {interruption_reason}")
             break
-            
+
         time.sleep(1)
         total_kwh += 1
         total_cost = total_kwh * CP_PRICE
-        
+
         CURRENT_KWH = total_kwh
         CURRENT_COST = total_cost
-        
+
         consumption_msg = f"CONSUMPTION#{driver_id}#{cp_id}#{total_kwh:.2f}#{total_cost:.2f}"
         kafka_send(producer, "consumo_cps", consumption_msg)
         engine_log(f"Consumo: {total_kwh:.2f} kWh | {total_cost:.2f}€")
-    
+
     # Limpiar variables de carga
     with CHARGE_LOCK:
         CHARGING_ACTIVE = False
         STOP_CHARGE = False
-    
+
     CURRENT_DRIVER = None
     CURRENT_KWH = 0.0
     CURRENT_COST = 0.0
-    
+
     # Solo volver a ACTIVE si no fue detenido manualmente por comando STOP
     if not MANUALLY_STOPPED and CP_STATUS not in ["OUT_OF_ORDER", "BROKEN"]:
         CP_STATUS = "ACTIVE"
+
     elif MANUALLY_STOPPED:
-        # Asegurar que permanece en BROKEN si fue detenido manualmente
-        CP_STATUS = "BROKEN"
+        CP_STATUS = "BROKEN"                                            # Asegurar que permanece en BROKEN si fue detenido manualmente
         engine_log("CP permanece en BROKEN por comando de Central")
 
     if charge_interrupted:
         end_msg = f"CHARGE_INTERRUPTED#{driver_id}#{cp_id}#{total_kwh:.2f}#{total_cost:.2f}#{interruption_reason}"
         engine_log(f"Carga interrumpida. Parcial: {total_kwh:.2f} kWh | {total_cost:.2f}€")
+
     else:
         end_msg = f"CHARGE_END#{driver_id}#{cp_id}#{total_kwh:.2f}#{total_cost:.2f}"
         engine_log(f"Carga finalizada. Total: {total_kwh:.2f} kWh | {total_cost:.2f}€")
-    
+
     kafka_send(producer, "consumo_cps", end_msg)
-    LAST_CHARGE_END = end_msg          # Guardar por si Central reinicia y necesita re-recibirlo
+    LAST_CHARGE_END = end_msg                           # Guardar por si Central reinicia y necesita re-recibirlo
 
 
+# Gestiona una conexión TCP con el Monitor
+# Mensaje formato: TIPO#campo1#campo2...
 def handle_monitor(conn, addr, producer):
     global CP_ID, CP_PRICE, CP_ADDRESS, CP_STATUS, CONFIG_RECEIVED, CURRENT_DRIVER, CURRENT_KWH, CURRENT_COST, STOP_CHARGE, CHARGING_ACTIVE, MANUALLY_STOPPED, FERNET, LAST_CHARGE_END, KEY_REVOKED_FLAG
     last_status = ""
@@ -214,7 +228,7 @@ def handle_monitor(conn, addr, producer):
             data = conn.recv(1024)
             if not data:
                 break
-            
+
             msg = data.decode()
             parts = msg.split("#")
             msg_type = parts[0]
@@ -223,6 +237,7 @@ def handle_monitor(conn, addr, producer):
                 driver_str = CURRENT_DRIVER if CURRENT_DRIVER else "None"
                 status_response = f"{CP_STATUS}#{driver_str}#{CURRENT_KWH:.2f}#{CURRENT_COST:.2f}"
 
+                # Solo loguear si el estado cambió
                 if last_status != status_response:
                     last_status = status_response
                     engine_log(f"Estado enviado al Monitor: {status_response}")
@@ -243,6 +258,7 @@ def handle_monitor(conn, addr, producer):
                     FERNET = Fernet(enc_key.encode())
                     KEY_REVOKED_FLAG = False
                     engine_log("Clave de cifrado configurada")
+                    
                 else:
                     FERNET = None
 
@@ -250,12 +266,12 @@ def handle_monitor(conn, addr, producer):
                 engine_log(f"Config recibida: {CP_ID} | {CP_ADDRESS} | {CP_PRICE}€/kWh")
                 conn.sendall(b"CONFIG_OK")
 
-                # Si Central reinició durante una carga y perdió el CHARGE_END,
-                # reenviarlo con la nueva clave para que el Driver reciba su ticket
+                # Reenviar para que Driver reciba su TICKET si Central reinició durante una carga y no procesó el CHARGE_END
                 if LAST_CHARGE_END:
                     engine_log("Re-enviando CHARGE_END con nueva clave (recuperación)")
                     kafka_send(producer, "consumo_cps", LAST_CHARGE_END)
 
+            # Central ha generado una nueva clave, invalidar la actual y esperar a que el Monitor inicie la re-autenticación 
             elif msg_type == "KEY_REVOKED":
                 KEY_REVOKED_FLAG = True
                 FERNET = None
@@ -281,11 +297,14 @@ def handle_monitor(conn, addr, producer):
                         args=(producer, driver_id, cp_id, duration),
                         daemon=True
                     ).start()
+
                 else:
                     if MANUALLY_STOPPED:
                         reason = "CP detenido por comando de Central (BROKEN)"
+
                     else:
                         reason = "CP ocupado o no disponible"
+
                     engine_log(f"Carga manual rechazada: {reason}")
                     conn.sendall(reason.encode())
 
@@ -320,7 +339,8 @@ def handle_monitor(conn, addr, producer):
 
 def listen_charge_requests(producer, broker_ip, broker_port):
     from kafka import KafkaConsumer
-    
+
+    # Esperar hasta recibir SET_CONFIG del Monitor o CP_ID antes de suscribirse a Kafka
     engine_log("Esperando configuración del Monitor...")
     while not CONFIG_RECEIVED or CP_ID is None:
         time.sleep(0.5)
@@ -331,11 +351,13 @@ def listen_charge_requests(producer, broker_ip, broker_port):
         group_id=f"engine-{CP_ID}",
         auto_offset_reset='latest'
     )
+
     consumer.subscribe(["peticiones_carga"])
 
-    # Descartar mensajes anteriores al arranque (ej. START_CHARGE de sesión anterior)
+    # seek_to_end evita procesar START_CHARGE de sesiones anteriores que todavía estuvieran en el tópico al arrancar
     while not consumer.assignment():
         consumer.poll(timeout_ms=100)
+
     consumer.seek_to_end()
 
     engine_log(f"Escuchando peticiones de carga para {CP_ID}")
@@ -365,6 +387,7 @@ def listen_charge_requests(producer, broker_ip, broker_port):
             else:
                 if MANUALLY_STOPPED:
                     engine_log("Petición rechazada: CP detenido manualmente (BROKEN)")
+                    
                 else:
                     engine_log("Petición rechazada: CP no disponible o ya en uso")
 
@@ -394,8 +417,8 @@ def main(broker_ip, broker_port, engine_port):
         while True:
             conn, addr = server.accept()
             threading.Thread(
-                target=handle_monitor, 
-                args=(conn, addr, producer), 
+                target=handle_monitor,
+                args=(conn, addr, producer),
                 daemon=True
             ).start()
 

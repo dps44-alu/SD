@@ -38,16 +38,18 @@ MESSAGE_LOCK = threading.Lock()
 IN_MENU = False
 SHUTDOWN_FLAG = False
 MENU_REFRESH_EVENT = threading.Event()
+
+# Grantizan que notify_drivers_on_shutdown se ejecuta solo una vez aunque sea llamada desde el signal handler y desde la opción 0 del menú
 _NOTIFY_LOCK = threading.Lock()
 _NOTIFY_SENT = False
 
-CP_KEYS = {}            # {cp_id: Fernet instance}
+CP_KEYS = {}                                # {cp_id: Fernet instance}
 CP_KEYS_LOCK = threading.Lock()
-PENDING_WEATHER_STOP = set()    # CPs that should stop after current charge ends
-COMMAND_RESPONSE_QUEUES = {}    # {cp_id: queue.Queue} for routing STOP_OK/RESUME_OK
+PENDING_WEATHER_STOP = set()                # CPs que deben parar cuando acabe la carga actual por alerta climática
+COMMAND_RESPONSE_QUEUES = {}                # Permite que el hilo que envía el comando espere bloqueado hasta recibir STOP_OK / RESUME_OK
 COMMAND_RESPONSE_LOCK = threading.Lock()
-SHARED_PRODUCER = None          # Kafka producer shared across threads
-WEATHER_DATA = {}               # {cp_id: {city, temp, alert, updated}}
+SHARED_PRODUCER = None                      # Productor de kafka compartido entre hilos (kafka, signal handler, revocación de claves)
+WEATHER_DATA = {}                           # {cp_id: {city, temp, alert, updated}}
 WEATHER_LOCK = threading.Lock()
 
 
@@ -57,6 +59,7 @@ WEATHER_LOCK = threading.Lock()
 def log_message(message):
     with MESSAGE_LOCK:
         MESSAGE_BUFFER.append(f"[{time.strftime('%H:%M:%S')}] {message}")
+
     MENU_REFRESH_EVENT.set()
 
 
@@ -65,24 +68,24 @@ def audit(action, source, details=""):
     try:
         with open(AUDIT_LOG_FILE, "a") as f:
             f.write(entry)
+
     except Exception:
-        pass
+        pass            # Un fallo de escritura no debe interrumpir el flujo principal del sistema
 
 
 def load_credentials():
     try:
         with open(CREDENTIALS_FILE, "r") as f:
             return json.load(f)
+        
     except FileNotFoundError:
         return {}
 
 
-# Limpiar pantalla de forma multiplataforma
 def clear_screen():
     os.system('cls' if os.name == 'nt' else 'clear')
 
 
-# Muestra todos los mensajes pendientes
 def display_pending_messages():
     with MESSAGE_LOCK:
         if MESSAGE_BUFFER:
@@ -96,7 +99,7 @@ def display_pending_messages():
             print("="*60)
             MESSAGE_BUFFER.clear()
             return True
-        
+
     return False
 
 
@@ -111,12 +114,12 @@ def load_db():
 
                 if not content.strip():
                     return {"charging_points": [], "drivers": []}
-                
+
                 return json.loads(content)
-            
+
         except FileNotFoundError:
             return {"charging_points": [], "drivers": []}
-        
+
         except json.JSONDecodeError:
             log_message("Central: Error leyendo BD, retornando BD vacía")
             return {"charging_points": [], "drivers": []}
@@ -137,6 +140,7 @@ def update_charging_point(cp_id, new_status, driver_id = "", kwh_consumed = 0, m
             cp["kwh_consumed"] = kwh_consumed
             cp["money_consumed"] = money_consumed
             break
+
     save_db(db)
 
 
@@ -145,21 +149,22 @@ def get_charging_point(cp_id):
     for cp in db["charging_points"]:
         if cp["id"] == cp_id:
             return cp
-        
+
     return None
 
 
 def add_charging_point(cp_id, address, price, status):
     db = load_db()
     db["charging_points"].append({
-        "id": cp_id, 
-        "address": address, 
-        "price": price, 
+        "id": cp_id,
+        "address": address,
+        "price": price,
         "status": status,
         "driver": "",
         "kwh_consumed": 0,
         "money_consumed": 0
     })
+
     save_db(db)
 
 
@@ -171,14 +176,15 @@ def list_charging_points():
 # ---------------------------
 # Control de CPs
 # ---------------------------
-# Envía un comando (STOP o RESUME) a un CP específico
 def send_command_to_cp(cp_id, command):
     with CONNECTIONS_LOCK:
         if cp_id not in ACTIVE_CONNECTIONS:
             log_message(f"Central: CP {cp_id} no está conectado")
             return False
+        
         conn = ACTIVE_CONNECTIONS[cp_id]
 
+    # Crear una Queue exclusiva para este comando y registrarla antes de enviar
     resp_queue = queue.Queue()
     with COMMAND_RESPONSE_LOCK:
         COMMAND_RESPONSE_QUEUES[cp_id] = resp_queue
@@ -200,10 +206,13 @@ def send_command_to_cp(cp_id, command):
                     current_cost = cp.get("money_consumed", 0) if cp else 0
                     update_charging_point(cp_id, "BROKEN", current_driver, current_kwh, current_cost)
                     log_message(f"Central: BD actualizada - {cp_id} → BROKEN (Averiado)")
+
                 elif command == "RESUME":
                     update_charging_point(cp_id, "ACTIVE", "")
                     log_message(f"Central: BD actualizada - {cp_id} → ACTIVE")
+
                 return True
+            
             else:
                 log_message(f"Central: Comando no confirmado por {cp_id}")
                 return False
@@ -215,24 +224,23 @@ def send_command_to_cp(cp_id, command):
     except Exception as e:
         log_message(f"Central: Error enviando comando a {cp_id}: {e}")
         return False
+    
     finally:
+        # Limpiar siempre la queue para no dejar entradas huérfanas
         with COMMAND_RESPONSE_LOCK:
             COMMAND_RESPONSE_QUEUES.pop(cp_id, None)
 
 
-# Para un punto de carga específico
 def stop_charging_point(cp_id):
     log_message(f"Central: Parando CP {cp_id}")
     return send_command_to_cp(cp_id, "STOP")
 
 
-# Reanuda un punto de carga específico
 def resume_charging_point(cp_id):
     log_message(f"Central: Reanudando CP {cp_id}")
     return send_command_to_cp(cp_id, "RESUME")
 
 
-# Para todos los puntos de carga
 def stop_all_charging_points():
     cps = list_charging_points()
     stopped_count = 0
@@ -244,7 +252,6 @@ def stop_all_charging_points():
     return stopped_count
 
 
-# Reanuda todos los puntos de carga
 def resume_all_charging_points():
     cps = list_charging_points()
     resumed_count = 0
@@ -259,16 +266,14 @@ def resume_all_charging_points():
 # ---------------------------
 # Menú de control
 # ---------------------------
-# Muestra el menú de control de la central
 def show_control_menu():
     clear_screen()
-    
-    # Mostrar mensajes pendientes ANTES del menú
+
     has_messages = display_pending_messages()
-    
+
     if has_messages:
-        print()  # Línea en blanco después de mensajes
-    
+        print()
+
     print(f"{'='*60}")
     print(f"  MENÚ DE CONTROL - CENTRAL")
     print(f"{'='*60}")
@@ -284,73 +289,73 @@ def show_control_menu():
     print(f"{'='*60}")
 
 
-# Bucle principal del menú de control
 def control_menu_loop():
     global IN_MENU, SHUTDOWN_FLAG
     IN_MENU = True
-    
-    # Thread para monitorear mensajes nuevos
+
     def monitor_messages():
         while not SHUTDOWN_FLAG and IN_MENU:
-            # Esperar hasta que haya un mensaje nuevo
             if MENU_REFRESH_EVENT.wait(timeout = 2):
                 MENU_REFRESH_EVENT.clear()
-    
+
     threading.Thread(target=monitor_messages, daemon=True).start()
-    
+
     while not SHUTDOWN_FLAG:
         try:
             show_control_menu()
-            
+
             print("\n  Selecciona una opción: ", end='', flush=True)
             option = input().strip()
-            
+
             if option == "1":
-                # Parar un CP específico
                 clear_screen()
                 display_pending_messages()
-                
+
                 cps = list_charging_points()
                 print(f"\n  Puntos de carga disponibles:")
                 for cp in cps:
                     print(f"    - {cp['id']} ({cp['status']})")
-                
+
                 cp_id = input("\n  Introduce el ID del CP a parar: ").strip()
                 if cp_id:
                     print(f"\n  Enviando comando STOP a {cp_id}...")
                     if stop_charging_point(cp_id):
                         print(f"  CP {cp_id} detenido correctamente (estado: BROKEN)")
                         audit("CP_STOP", "central_menu", f"cp_id={cp_id}")
+
                     else:
                         print(f"  No se pudo detener el CP {cp_id}")
+
                 else:
                     print(f"  ID vacío, operación cancelada")
+
                 input("\n  Presiona ENTER para continuar...")
-                
+
             elif option == "2":
-                # Reanudar un CP específico
                 clear_screen()
                 display_pending_messages()
-                
+
                 cps = list_charging_points()
                 print(f"\n  Puntos de carga disponibles:")
                 for cp in cps:
                     print(f"    - {cp['id']} ({cp['status']})")
-                
+
                 cp_id = input("\n  Introduce el ID del CP a reanudar: ").strip()
                 if cp_id:
                     print(f"\n  Enviando comando RESUME a {cp_id}...")
                     if resume_charging_point(cp_id):
                         print(f"  CP {cp_id} reanudado correctamente")
                         audit("CP_RESUME", "central_menu", f"cp_id={cp_id}")
+
                     else:
                         print(f"  No se pudo reanudar el CP {cp_id}")
+
                 else:
                     print(f"  ID vacío, operación cancelada")
+
                 input("\n  Presiona ENTER para continuar...")
-                
+
             elif option == "3":
-                # Parar todos los CPs
                 clear_screen()
                 display_pending_messages()
                 print(f"\n  Deteniendo todos los puntos de carga...")
@@ -359,19 +364,17 @@ def control_menu_loop():
                 input("\n  Presiona ENTER para continuar...")
 
             elif option == "4":
-                # Reanudar todos los CPs
                 clear_screen()
                 display_pending_messages()
                 print(f"\n  Reanudando todos los puntos de carga...")
                 count = resume_all_charging_points()
                 print(f"  {count} puntos de carga reanudados")
                 input("\n  Presiona ENTER para continuar...")
-                
+
             elif option == "5":
-                # Ver estado de todos los CPs
                 clear_screen()
                 display_pending_messages()
-                
+
                 cps = list_charging_points()
                 print(f"\n{'─'*60}")
                 print(f"  ESTADO DE PUNTOS DE CARGA")
@@ -379,15 +382,16 @@ def control_menu_loop():
                 for cp in cps:
                     with CONNECTIONS_LOCK:
                         connected = "Conectado" if cp["id"] in ACTIVE_CONNECTIONS else "Desconectado"
+                        
                     print(f"  {cp['id']:<10} - {cp['status']:<15} - {connected}")
+
                 print(f"{'─'*60}")
                 input("\n  Presiona ENTER para continuar...")
-                
+
             elif option == "6":
                 continue
 
             elif option == "7":
-                # Revocar clave de un CP
                 clear_screen()
                 display_pending_messages()
 
@@ -411,34 +415,42 @@ def control_menu_loop():
 
                     with CP_KEYS_LOCK:
                         del CP_KEYS[cp_id]
+
                     update_charging_point(cp_id, "OUT_OF_ORDER", "", 0, 0)
                     audit("KEY_REVOKED", "central_menu", f"cp_id={cp_id}")
                     log_message(f"Central: Clave revocada para {cp_id} → OUT_OF_ORDER")
                     print(f"  Clave de {cp_id} revocada. CP puesto en OUT_OF_ORDER.")
 
+                    # Si el CP estaba en carga, emitir un ticket parcial para que el Driver no se quede esperando
                     if was_busy and busy_driver and SHARED_PRODUCER:
                         ticket = (f"CHARGE_INTERRUPTED#{busy_driver}#{cp_id}"
                                   f"#{busy_kwh:.2f}#{busy_cost:.2f}#clave revocada por Central")
+                        
                         SHARED_PRODUCER.send("respuestas_central", ticket)
                         SHARED_PRODUCER.flush()
                         log_message(f"Central: Ticket parcial enviado a {busy_driver} — {busy_kwh:.2f} kWh, {busy_cost:.2f}€")
                         audit("CHARGE_INTERRUPTED", cp_id, f"driver={busy_driver} kwh={busy_kwh:.2f} cost={busy_cost:.2f}")
                         with CHARGING_START_LOCK:
                             CHARGING_START_TIMES.pop(cp_id, None)
+                            
+                    # Notificar al Monitor para que propague KEY_REVOKED al Engine
                     with CONNECTIONS_LOCK:
                         monitor_conn = ACTIVE_CONNECTIONS.get(cp_id)
+
                     if monitor_conn:
                         try:
                             monitor_conn.sendall(f"KEY_REVOKED#{cp_id}".encode())
                             log_message(f"Central: Monitor {cp_id} notificado de la revocación")
+
                         except Exception as e:
                             log_message(f"Central: No se pudo notificar revocación a Monitor {cp_id}: {e}")
+
                 else:
                     print(f"  CP '{cp_id}' no encontrado")
+
                 input("\n  Presiona ENTER para continuar...")
 
             elif option == "8":
-                # Ver log de auditoría
                 clear_screen()
                 print(f"\n{'─'*70}")
                 print(f"  LOG DE AUDITORÍA")
@@ -446,11 +458,14 @@ def control_menu_loop():
                 try:
                     with open(AUDIT_LOG_FILE, "r") as f:
                         lines = f.readlines()
+
                     last_lines = lines[-30:] if len(lines) > 30 else lines
                     for line in last_lines:
                         print(f"  {line}", end="")
+
                 except FileNotFoundError:
                     print("  (sin entradas aún)")
+
                 print(f"{'─'*70}")
                 input("\n  Presiona ENTER para continuar...")
 
@@ -458,19 +473,20 @@ def control_menu_loop():
                 notify_drivers_on_shutdown()
                 print(f"\n  Saliendo del menú de control...")
                 break
-                
-            elif option:  # Solo mostrar error si se ingresó algo
+
+            elif option:
                 print(f"\n  Opción inválida")
                 time.sleep(1)
-                
+
         except KeyboardInterrupt:
             print(f"\n\n  Saliendo del menú de control...")
             SHUTDOWN_FLAG = True
             break
+
         except Exception as e:
             print(f"\n  Error: {e}")
             time.sleep(1)
-    
+
     IN_MENU = False
 
 
@@ -478,53 +494,62 @@ def control_menu_loop():
 # Panel Tkinter
 # ---------------------------
 status_colors = {
-    "ACTIVE":       "#2e7d32",   # green
-    "BUSY":         "#2e7d32",   # green (same as ACTIVE)
-    "OUT_OF_ORDER": "#e65100",   # orange
-    "BROKEN":       "#b71c1c",   # red
-    "INACTIVE":     "#424242",   # dark grey
-    "DISCONNECTED": "#424242",
+    "ACTIVE":       "#2e7d32",      # Verde
+    "BUSY":         "#2e7d32",      # Verde
+    "OUT_OF_ORDER": "#e65100",      # Naranja
+    "BROKEN":       "#b71c1c",      # Rojo
+    "INACTIVE":     "#424242",      # Gris
+    "DISCONNECTED": "#424242",      # Gris
 }
 
 
+# Devuelve (text, color) para el titulo de un CP
 def _cp_tile_content(cp):
-    """Return (text, color) for a CP tile."""
     with CONNECTIONS_LOCK:
         connected = cp["id"] in ACTIVE_CONNECTIONS
+
     if not connected:
         return (f"{cp['id']}\n{cp['address']}\n{cp['price']}€/kWh\nDESCONECTADO",
                 status_colors["DISCONNECTED"])
+    
     status = cp["status"]
     if status == "BUSY":
         text = (f"{cp['id']}\n{cp['address']}\n{cp['price']}€/kWh\n"
                 f"{cp['driver']}\n{cp['kwh_consumed']} kWh\n{cp['money_consumed']}€")
+        
     elif status == "BROKEN":
         text = f"{cp['id']}\n{cp['address']}\n{cp['price']}€/kWh\nAveriado"
+
     elif status == "OUT_OF_ORDER":
         text = f"{cp['id']}\n{cp['address']}\n{cp['price']}€/kWh\nFuera de Servicio"
+
     else:
         text = f"{cp['id']}\n{cp['address']}\n{cp['price']}€/kWh\n{status}"
+
     return text, status_colors.get(status, status_colors["INACTIVE"])
 
 
+# Crea una sección oscura con un título y un widget Text
 def _make_section(parent, title, text_height):
-    """Create a labelled dark section with a Text widget + scrollbar. Returns Text widget."""
     frame = tk.Frame(parent, bg="#1e1e1e")
     tk.Label(frame, text=title, bg="#1e1e1e", fg="#888888",
              font=("Arial", 9, "bold")).pack(anchor="w", padx=6, pady=(6, 1))
+    
     inner = tk.Frame(frame, bg="#1e1e1e")
     inner.pack(fill="both", expand=True, padx=6, pady=(0, 6))
     scroll = tk.Scrollbar(inner, bg="#3a3a3a", troughcolor="#2d2d2d",
                           activebackground="#555555", width=10)
+    
     scroll.pack(side="right", fill="y")
     widget = tk.Text(inner, height=text_height, bg="#1a1a2e", fg="#c9d1d9",
                      font=("Consolas", 9), state="disabled", wrap="none",
                      borderwidth=0, relief="flat", insertbackground="white",
                      selectbackground="#264f78",
                      yscrollcommand=scroll.set)
+    
     widget.pack(side="left", fill="both", expand=True)
     scroll.config(command=widget.yview)
-    return frame, widget
+    return frame, widget                                    # Devuelve el widget Text
 
 
 def create_panel():
@@ -547,31 +572,52 @@ def create_panel():
         label = tk.Label(root, text=text, bg=color, fg="white",
                          font=("Arial", 12), width=20, height=8,
                          relief="flat", borderwidth=0)
+        
         label.grid(row=r, column=c, padx=4, pady=4, sticky="nsew")
         LABELS[cp["id"]] = label
 
     bottom_row = (max(len(cps) - 1, 0) // cols) + 1
 
-    # --- ON GOING DRIVERS REQUESTS (first) ---
-    _DRV_FRAME, DRIVERS_WIDGET = _make_section(root, "ON GOING DRIVERS REQUESTS", 5)
+    # ON GOING DRIVERS REQUESTS con máximo 5 drivers
+    _DRV_FRAME = tk.Frame(root, bg="#1e1e1e")
+    tk.Label(_DRV_FRAME, text="ON GOING DRIVERS REQUESTS", bg="#1e1e1e", fg="#888888",
+             font=("Arial", 9, "bold")).pack(anchor="w", padx=6, pady=(6, 1))
+    
+    DRIVERS_WIDGET = tk.Text(_DRV_FRAME, height=7, bg="#1a1a2e", fg="#c9d1d9",
+                             font=("Consolas", 9), state="disabled", wrap="none",
+                             borderwidth=0, relief="flat", insertbackground="white",
+                             selectbackground="#264f78")
+    
+    DRIVERS_WIDGET.pack(fill="both", expand=True, padx=6, pady=(0, 6))
     _DRV_FRAME.grid(row=bottom_row, column=0, columnspan=cols,
                     padx=4, pady=(8, 2), sticky="ew")
+    
     DRIVERS_WIDGET.tag_configure("header", foreground="#c9d1d9", font=("Consolas", 9, "bold"))
     DRIVERS_WIDGET.tag_configure("sep",    foreground="#30363d")
     DRIVERS_WIDGET.tag_configure("row",    foreground="#c9d1d9")
     DRIVERS_WIDGET.tag_configure("empty",  foreground="#484f58")
 
-    # --- APPLICATION MESSAGES (second) ---
-    _MSG_FRAME, MESSAGE_WIDGET = _make_section(root, "APPLICATION MESSAGES", 8)
+    # APPLICATION MESSAGES con solo últimos 10
+    _MSG_FRAME = tk.Frame(root, bg="#1e1e1e")
+    tk.Label(_MSG_FRAME, text="APPLICATION MESSAGES", bg="#1e1e1e", fg="#888888",
+             font=("Arial", 9, "bold")).pack(anchor="w", padx=6, pady=(6, 1))
+    
+    MESSAGE_WIDGET = tk.Text(_MSG_FRAME, height=10, bg="#1a1a2e", fg="#c9d1d9",
+                             font=("Consolas", 9), state="disabled", wrap="none",
+                             borderwidth=0, relief="flat", insertbackground="white",
+                             selectbackground="#264f78")
+    
+    MESSAGE_WIDGET.pack(fill="both", expand=True, padx=6, pady=(0, 6))
     _MSG_FRAME.grid(row=bottom_row + 1, column=0, columnspan=cols,
                     padx=4, pady=(2, 8), sticky="ew")
+    
     MESSAGE_WIDGET.tag_configure("ts",   foreground="#484f58")
     MESSAGE_WIDGET.tag_configure("ok",   foreground="#c9d1d9")
     MESSAGE_WIDGET.tag_configure("warn", foreground="#c9d1d9")
     MESSAGE_WIDGET.tag_configure("err",  foreground="#c9d1d9")
     MESSAGE_WIDGET.tag_configure("info", foreground="#c9d1d9")
 
-    root.after(500, refresh_panel, root)
+    root.after(500, refresh_panel, root)        # Programa refresh_panel en el hilo de Tkinter
     root.mainloop()
 
 
@@ -585,7 +631,7 @@ def refresh_panel(root):
     cols = 3
     cps = list_charging_points()
 
-    # Detect new CPs and create their tiles
+    # Crear tiles para CPs que se hayan registrado tras el arranque del panel.
     new_cps = [cp for cp in cps if cp["id"] not in LABELS]
     if new_cps:
         for cp in new_cps:
@@ -595,29 +641,31 @@ def refresh_panel(root):
             label = tk.Label(root, text=text, bg=color, fg="white",
                              font=("Arial", 12), width=20, height=8,
                              relief="flat", borderwidth=0)
+            
             label.grid(row=r, column=c, padx=4, pady=4, sticky="nsew")
             LABELS[cp["id"]] = label
-        # Reposition bottom sections after new tiles
-        bottom_row = (max(len(cps) - 1, 0) // cols) + 1
+
+        bottom_row = (max(len(cps) - 1, 0) // cols) + 1             # Reposicionar las secciones inferiores tras añadir nuevas filas de tiles
         if _DRV_FRAME:
             _DRV_FRAME.grid(row=bottom_row, column=0, columnspan=cols,
                             padx=4, pady=(8, 2), sticky="ew")
+            
         if _MSG_FRAME:
             _MSG_FRAME.grid(row=bottom_row + 1, column=0, columnspan=cols,
                             padx=4, pady=(2, 8), sticky="ew")
 
-    # Update existing CP tiles
     for cp in cps:
         label = LABELS.get(cp["id"])
         if label:
             text, color = _cp_tile_content(cp)
             label.config(text=text, bg=color)
 
-    # ON GOING DRIVERS REQUESTS
+    # ON GOING DRIVERS REQUESTS, máximo 5 entradas
     if DRIVERS_WIDGET:
-        busy = [cp for cp in cps if cp.get("status") == "BUSY" and cp.get("driver")]
+        busy = [cp for cp in cps if cp.get("status") == "BUSY" and cp.get("driver")][:5]
         with CHARGING_START_LOCK:
             start_times = dict(CHARGING_START_TIMES)
+
         DRIVERS_WIDGET.config(state="normal")
         DRIVERS_WIDGET.delete("1.0", "end")
         if busy:
@@ -628,37 +676,47 @@ def refresh_panel(root):
                 start = start_times.get(cp["id"], "--:--:--")
                 line = (f"  {cp['driver']:<16} {cp['id']:<8} {start:<10}"
                         f" {cp['kwh_consumed']:>6.2f}  {cp['money_consumed']:>7.2f}€\n")
+                
                 DRIVERS_WIDGET.insert("end", line, "row")
+
         else:
             DRIVERS_WIDGET.insert("end", "  (sin cargas activas)\n", "empty")
+
         DRIVERS_WIDGET.config(state="disabled")
 
-    # APPLICATION MESSAGES
+    # APPLICATION MESSAGES, solo los últimos 10
     if MESSAGE_WIDGET:
         with MESSAGE_LOCK:
-            msgs = list(MESSAGE_BUFFER[-20:])
+            msgs = list(MESSAGE_BUFFER[-10:])
+
         MESSAGE_WIDGET.config(state="normal")
         MESSAGE_WIDGET.delete("1.0", "end")
         for m in msgs:
-            # Split "[HH:MM:SS] rest"
             if m.startswith("[") and "]" in m:
                 idx = m.index("]") + 1
                 ts, rest = m[:idx], m[idx:]
+
             else:
                 ts, rest = "", m
+
             if ts:
                 MESSAGE_WIDGET.insert("end", ts, "ts")
+
             low = rest.lower()
             if any(w in low for w in ("error", "rechazad", "fallo", "broken", "fail")):
                 tag = "err"
+
             elif any(w in low for w in ("alerta", "avería", "out_of_order", "interrumpid")):
                 tag = "warn"
+
             elif any(w in low for w in ("autenticado", "aceptad", "active", "reanud", " ok")):
                 tag = "ok"
+
             else:
                 tag = "info"
+
             MESSAGE_WIDGET.insert("end", rest + "\n", tag)
-        MESSAGE_WIDGET.see("end")
+
         MESSAGE_WIDGET.config(state="disabled")
 
     root.after(500, refresh_panel, root)
@@ -667,7 +725,6 @@ def refresh_panel(root):
 # ---------------------------
 # Kafka - Escuchar consumo de CPs
 # ---------------------------
-# Escucha las actualizaciones de consumo que envían los CPs
 def listen_cp_consumption(broker_ip, broker_port):
     consumer = KafkaConsumer(
         "consumo_cps",
@@ -675,12 +732,12 @@ def listen_cp_consumption(broker_ip, broker_port):
         value_deserializer=lambda v: v.decode("utf-8"),
         group_id="central-consumption"
     )
-    
+
     producer = KafkaProducer(
         bootstrap_servers=f"{broker_ip}:{broker_port}",
         value_serializer=lambda v: v.encode("utf-8")
     )
-    
+
     log_message("Central: Escuchando actualizaciones de consumo de CPs")
 
     for msg in consumer:
@@ -688,26 +745,30 @@ def listen_cp_consumption(broker_ip, broker_port):
             break
 
         raw = msg.value
-        # Format: "cp_id#<fernet_token>" or plain text (legacy/unencrypted)
+        # Si hay clave Fernet para ese CP se descifra, sino se trata como texto sin cifrar y Central lo marca como no comprensible si esperaba cifrado
         try:
             sep = raw.index("#")
             cp_id_prefix = raw[:sep]
             token = raw[sep+1:]
             with CP_KEYS_LOCK:
                 fernet = CP_KEYS.get(cp_id_prefix)
+
             if fernet:
                 try:
                     consumption = fernet.decrypt(token.encode()).decode()
+
                 except Exception:
                     log_message(f"Central: CP {cp_id_prefix} — mensaje no comprensible (clave incorrecta)")
                     continue
+
             else:
                 consumption = raw
+
         except Exception:
             consumption = raw
 
         parts = consumption.split("#")
-        
+
         if parts[0] == "CONSUMPTION":
             driver_id = parts[1]
             cp_id = parts[2]
@@ -721,7 +782,7 @@ def listen_cp_consumption(broker_ip, broker_port):
             producer.send("respuestas_central", consumption)
             producer.flush()
             log_message(f"Central: Consumo en {cp_id}: {kwh:.2f} kWh, {cost:.2f}€")
-            
+
         elif parts[0] == "CHARGE_END":
             driver_id = parts[1]
             cp_id = parts[2]
@@ -734,17 +795,21 @@ def listen_cp_consumption(broker_ip, broker_port):
             cp = get_charging_point(cp_id)
             if cp and cp["status"] != "BROKEN":
                 if cp_id in PENDING_WEATHER_STOP:
-                    PENDING_WEATHER_STOP.discard(cp_id)
+                    PENDING_WEATHER_STOP.discard(cp_id)                     # Ahora que la carga terminó, ejecutar el STOP 
                     stop_charging_point(cp_id)
                     update_charging_point(cp_id, "OUT_OF_ORDER")
                     log_message(f"Central: {cp_id} → OUT_OF_ORDER (alerta climática pendiente)")
+
                 else:
                     with CONNECTIONS_LOCK:
                         monitor_connected = cp_id in ACTIVE_CONNECTIONS
+
                     if monitor_connected:
                         update_charging_point(cp_id, "ACTIVE")
+
+                    # El Monitor cayó mientras el Engine completaba la carga
                     else:
-                        update_charging_point(cp_id, "INACTIVE")
+                        update_charging_point(cp_id, "INACTIVE")                        # Marcar INACTIVE para bloquear nuevas cargas hasta que el Monitor reconecte
                         log_message(f"Central: {cp_id} → INACTIVE (Monitor desconectado)")
 
             with CHARGING_START_LOCK:
@@ -760,9 +825,9 @@ def listen_cp_consumption(broker_ip, broker_port):
             kwh = float(parts[3])
             cost = float(parts[4])
             reason = parts[5] if len(parts) > 5 else "motivo desconocido"
-            
+
             log_message(f"Central: Carga interrumpida en {cp_id}: {kwh:.2f} kWh, {cost:.2f}€ - {reason}")
-            
+
             with CHARGING_START_LOCK:
                 CHARGING_START_TIMES.pop(cp_id, None)
 
@@ -774,7 +839,6 @@ def listen_cp_consumption(broker_ip, broker_port):
 # ---------------------------
 # Kafka - Drivers
 # ---------------------------
-# Escucha peticiones de drivers y delega al CP correspondiente
 def handle_driver(broker_ip, broker_port):
     consumer = KafkaConsumer(
         "peticiones_conductores",
@@ -789,11 +853,11 @@ def handle_driver(broker_ip, broker_port):
     )
 
     log_message("Central: Escuchando peticiones de drivers")
-    
+
     for msg in consumer:
         if SHUTDOWN_FLAG:
             break
-            
+
         request = msg.value
         parts = request.split("#")
         msg_type = parts[0]
@@ -803,11 +867,11 @@ def handle_driver(broker_ip, broker_port):
         if msg_type == "REQUEST":
             duration = int(parts[3])
             cp = get_charging_point(cp_id)
-            
+
             log_message(f"Central: Petición de {driver_id} para {cp_id} ({duration}s)")
-            
+
             if cp and cp["status"] == "ACTIVE":
-                update_charging_point(cp_id, "BUSY", driver_id)
+                update_charging_point(cp_id, "BUSY", driver_id)     # Marcar el como BUSY antes de enviar START_CHARGE para evitar que una segunda petición ACTIVE
                 with CHARGING_START_LOCK:
                     CHARGING_START_TIMES[cp_id] = time.strftime("%H:%M:%S")
 
@@ -815,10 +879,11 @@ def handle_driver(broker_ip, broker_port):
                 producer.send("peticiones_carga", charge_request)
                 producer.flush()
                 log_message(f"Central: Petición aceptada y enviada a {cp_id}")
-                
+
                 response = f"ACCEPTED#{driver_id}#{cp_id}"
                 producer.send("respuestas_central", response)
                 producer.flush()
+
             else:
                 log_message(f"Central: Petición rechazada - {cp_id} no disponible")
                 response = f"REJECTED#{driver_id}#{cp_id}"
@@ -842,6 +907,7 @@ def args():
     return central_port, broker_ip, broker_port
 
 
+# Al arrancar, poner todos los CPs en INACTIVE: los Monitores que se reconecten pasarán a ACTIVE mediante AUTH
 def reset_charging_points():
     db = load_db()
     for cp in db["charging_points"]:
@@ -849,6 +915,7 @@ def reset_charging_points():
         cp["driver"] = ""
         cp["kwh_consumed"] = 0
         cp["money_consumed"] = 0
+
     save_db(db)
 
 
@@ -857,36 +924,39 @@ def cp_authentication(cp_id, username, password):
     stored = creds.get(cp_id)
     if stored and stored.get("username") == username and stored.get("password") == password:
         return True
+    
     return False
 
 
-# Maneja las conexiones de los monitores en un hilo separado
 def handle_monitor_connection(conn, addr):
     log_message(f"Central: Conexión de Monitor desde {addr}")
     cp_id = None
-    
+
     try:
         while not SHUTDOWN_FLAG:
             try:
-                conn.settimeout(1.0)  # Timeout para poder revisar SHUTDOWN_FLAG
+                conn.settimeout(1.0)        # Timeout para poder revisar SHUTDOWN_FLAG
                 data = conn.recv(1024)
             except socket.timeout:
                 continue
             except Exception as e:
                 break
-                
+
             if not data:
                 break
-                
+
             msg = data.decode()
             parts = msg.split("#")
             msg_type = parts[0]
 
+            # Las respuestas STOP_OK / RESUME_OK del Monitor se enrutan a la Queue que ese hilo registró antes de enviar el comando
             if msg_type in ("STOP_OK", "RESUME_OK", "ERROR"):
                 with COMMAND_RESPONSE_LOCK:
                     q = COMMAND_RESPONSE_QUEUES.get(cp_id)
+
                 if q:
                     q.put(msg_type)
+
                 continue
 
             if len(parts) < 5:
@@ -903,8 +973,9 @@ def handle_monitor_connection(conn, addr):
                 source_ip = addr[0] if addr else "unknown"
                 auth_ok = cp_authentication(cp_id, username, password)
 
+                # Generar una clave Fernet nueva en cada autenticación 
                 if auth_ok:
-                    key = Fernet.generate_key()
+                    key = Fernet.generate_key()     # Garantiza que si una sesión se ve comprometida, las sesiones anteriores y futuras no lo están
                     fernet = Fernet(key)
                     with CP_KEYS_LOCK:
                         CP_KEYS[cp_id] = fernet
@@ -918,6 +989,7 @@ def handle_monitor_connection(conn, addr):
 
                     log_message(f"Central: CP autenticado {cp_id}")
                     audit("AUTH_SUCCESS", source_ip, f"cp_id={cp_id} user={username}")
+
                 else:
                     conn.sendall(b"REJECTED")
                     log_message(f"Central: CP {cp_id} rechazado (credenciales inválidas)")
@@ -929,18 +1001,20 @@ def handle_monitor_connection(conn, addr):
                     cp = get_charging_point(cp_id)
                     if not cp:
                         continue
-                    # Never let the Monitor overwrite BROKEN — only STOP/RESUME commands do that
+
+                    # Nunca dejar que el Monitor reemplace BROKEN con OUT_OF_ORDER
                     if cp["status"] == "BROKEN":
                         continue
-                    # Never let the Monitor replace OUT_OF_ORDER with BROKEN (weather stop: Engine
-                    # reports BROKEN due to MANUALLY_STOPPED, but Central keeps OUT_OF_ORDER)
+
+                    # Nunca dejar que el Monitor reemplace OUT_OF_ORDER con BROKEN
                     if cp["status"] == "OUT_OF_ORDER" and cp_status == "BROKEN":
                         continue
-                    # Never let the Monitor reset BUSY to ACTIVE — only CHARGE_END/INTERRUPTED do that
+
+                    # Nunca dejar que el Monitor reemplace BUSY con ACTIVE, solo CHARGE_END/INTERRUPTED hacen eso
                     if cp["status"] == "BUSY" and cp_status == "ACTIVE":
                         continue
 
-                    # Engine died during a charge → send partial ticket to Driver
+                    # Engine murió durante una carga -> enviar ticket parcial al Driver
                     if cp["status"] == "BUSY" and cp_status == "OUT_OF_ORDER":
                         driver_id = cp.get("driver", "")
                         kwh = cp.get("kwh_consumed", 0)
@@ -951,9 +1025,11 @@ def handle_monitor_connection(conn, addr):
                             SHARED_PRODUCER.flush()
                             log_message(f"Central: Ticket parcial enviado a {driver_id} — {kwh:.2f} kWh, {cost:.2f}€")
                             audit("CHARGE_INTERRUPTED", cp_id, f"driver={driver_id} kwh={kwh:.2f} cost={cost:.2f}")
+
                         with CHARGING_START_LOCK:
                             CHARGING_START_TIMES.pop(cp_id, None)
-                        # Reset driver info so the CP can accept new charges once it recovers
+
+                        # Resetear la info del driver para que el CP pueda aceptar nuevas cargas una vez se recupere
                         update_charging_point(cp_id, cp_status, "", 0, 0)
                         log_message(f"Central: Estado actualizado {cp_id} -> {cp_status}")
                         continue
@@ -964,7 +1040,7 @@ def handle_monitor_connection(conn, addr):
 
                     update_charging_point(cp_id, cp_status, current_driver, current_kwh, current_cost)
                     log_message(f"Central: Estado actualizado {cp_id} -> {cp_status}")
-                    
+
     except Exception as e:
         log_message(f"Central: Error con Monitor: {e}")
 
@@ -973,7 +1049,8 @@ def handle_monitor_connection(conn, addr):
             with CONNECTIONS_LOCK:
                 if cp_id in ACTIVE_CONNECTIONS:
                     del ACTIVE_CONNECTIONS[cp_id]
-            # Mark INACTIVE so no new charges are accepted while Monitor is down
+            # Poner INACTIVE para que el sistema bloquee nuevas cargas mientras el Monitor esté caído,
+            # pero permita que las cargas en curso terminen en el Engine
             cp = get_charging_point(cp_id)
             if cp:
                 update_charging_point(
@@ -982,8 +1059,10 @@ def handle_monitor_connection(conn, addr):
                     cp.get("kwh_consumed", 0),
                     cp.get("money_consumed", 0)
                 )
+
             log_message(f"Central: CP {cp_id} desconectado → INACTIVE")
             audit("CP_DISCONNECTED", cp_id, "Monitor desconectado")
+
         conn.close()
 
 
@@ -992,7 +1071,7 @@ def main(central_port):
         server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         server.bind((CENTRAL_IP, central_port))
         server.listen()
-        server.settimeout(1.0)  # Timeout para permitir shutdown
+        server.settimeout(1.0)                                                          # Timeout para permitir shutdown
         log_message(f"Central: Servidor escuchando en {CENTRAL_IP}:{central_port}")
 
         while not SHUTDOWN_FLAG:
@@ -1012,19 +1091,23 @@ def main(central_port):
                     log_message(f"Central: Error aceptando conexión: {e}")
 
 
-# Avisa a los drivers con carga activa que Central se cierra (la carga continúa en el Engine)
+# Pede ser llamada desde signal_handler (Ctrl+C) y desde la opción 0 del menú simultáneamente, solo ejecuta una vez gracias al lock
 def notify_drivers_on_shutdown():
     global _NOTIFY_SENT
     with _NOTIFY_LOCK:
         if _NOTIFY_SENT:
             return
+        
         _NOTIFY_SENT = True
+
     if not SHARED_PRODUCER:
         return
+    
     cps = list_charging_points()
     busy = [cp for cp in cps if cp.get("status") == "BUSY" and cp.get("driver")]
     if not busy:
         return
+    
     print(f"\n[Central] Avisando a {len(busy)} conductor(es) activo(s) de la caída...")
     for cp in busy:
         driver_id = cp.get("driver", "")
@@ -1033,26 +1116,29 @@ def notify_drivers_on_shutdown():
             msg = f"CENTRAL_DOWN#{driver_id}#{cp_id}"
             try:
                 SHARED_PRODUCER.send("respuestas_central", msg)
+
             except Exception as e:
                 print(f"[Central] Error avisando a {driver_id}: {e}")
+
     try:
         SHARED_PRODUCER.flush()
         print("[Central] Avisos enviados.")
+
     except Exception:
         pass
 
 
-# Manejador de señal para Ctrl+C
 def signal_handler(sig, frame):
     global SHUTDOWN_FLAG
     if SHUTDOWN_FLAG:
         return
+    
     SHUTDOWN_FLAG = True
     print("\n[Central] Señal de interrupción recibida. Cerrando sistema...")
     notify_drivers_on_shutdown()
 
 
-# Endpoint para recibir alertas de EV_W -> {"cp_id": "ALC1", "alert_type": "ALERT|CANCEL", "reason": "..."}
+# POST /weather/alert -> EV_W notifica alerta o cancelación climática para un CP
 @app.route('/weather/alert', methods=['POST'])
 def weather_alert():
     try:
@@ -1060,23 +1146,23 @@ def weather_alert():
         cp_id = data.get("cp_id")
         alert_type = data.get("alert_type")
         reason = data.get("reason", "")
-        
+
         if not cp_id or not alert_type:
             return jsonify({"status": "ERROR", "message": "Faltan datos"}), 400
-        
+
         cp = get_charging_point(cp_id)
         if not cp:
             return jsonify({"status": "ERROR", "message": "CP no encontrado"}), 404
-        
+
         if alert_type == "ALERT":
             log_message(f"Central: Alerta climática en {cp_id} - {reason}")
             audit("WEATHER_ALERT", "EV_W", f"cp_id={cp_id} reason={reason}")
 
             if cp["status"] == "BUSY":
-                # Let the current charge finish, then stop
-                PENDING_WEATHER_STOP.add(cp_id)
+                PENDING_WEATHER_STOP.add(cp_id)         # Añadir a PENDING_WEATHER_STOP para ejecutar el STOP en cuanto llegue el CHARGE_END
                 log_message(f"Central: {cp_id} está BUSY — se detendrá al terminar la carga")
                 return jsonify({"status": "SUCCESS", "action": "STOP_PENDING"}), 200
+            
             else:
                 if stop_charging_point(cp_id):
                     cp_now = get_charging_point(cp_id)
@@ -1085,8 +1171,10 @@ def weather_alert():
                                               cp_now.get("driver", ""),
                                               cp_now.get("kwh_consumed", 0),
                                               cp_now.get("money_consumed", 0))
+                        
                     log_message(f"Central: {cp_id} detenido por alerta climática")
                     return jsonify({"status": "SUCCESS", "action": "CP_STOPPED"}), 200
+                
                 else:
                     return jsonify({"status": "ERROR", "message": "No se pudo detener CP"}), 500
 
@@ -1098,17 +1186,18 @@ def weather_alert():
             if resume_charging_point(cp_id):
                 log_message(f"Central: {cp_id} reanudado tras normalización")
                 return jsonify({"status": "SUCCESS", "action": "CP_RESUMED"}), 200
+            
             else:
                 return jsonify({"status": "ERROR", "message": "No se pudo reanudar CP"}), 500
-        
+
         return jsonify({"status": "SUCCESS"}), 200
-        
+
     except Exception as e:
         log_message(f"Central: Error procesando alerta climática: {e}")
         return jsonify({"status": "ERROR", "message": str(e)}), 500
-    
 
-# POST /weather/data — EV_W empuja lecturas de temperatura
+
+# POST /weather/data -> EV_W empuja lecturas de temperatura
 @app.route('/weather/data', methods=['POST'])
 def receive_weather_data():
     try:
@@ -1126,61 +1215,59 @@ def receive_weather_data():
                     "updated": time.strftime("%H:%M:%S"),
                     "ts":      time.time()
                 }
+
             return jsonify({"status": "SUCCESS"}), 200
+        
         return jsonify({"status": "ERROR", "message": "Datos incompletos"}), 400
+    
     except Exception as e:
         return jsonify({"status": "ERROR", "message": str(e)}), 500
 
 
 # GET /api/charging_points
-# Devuelve todos los puntos de carga con su estado actual
 @app.route('/api/charging_points', methods=['GET'])
 def get_all_charging_points():
     try:
         cps = list_charging_points()
-        
-        # Añadir info de conexión
+
         with CONNECTIONS_LOCK:
             for cp in cps:
                 cp['connected'] = cp['id'] in ACTIVE_CONNECTIONS
-        
+
         return jsonify({
             "status": "SUCCESS",
             "data": cps,
             "count": len(cps)
         }), 200
-        
+
     except Exception as e:
         log_message(f"Central API: Error obteniendo CPs: {e}")
         return jsonify({"status": "ERROR", "message": str(e)}), 500
 
 
 # GET /api/charging_points/<cp_id>
-# Devuelve detalle de un CP específico
 @app.route('/api/charging_points/<cp_id>', methods=['GET'])
 def get_charging_point_detail(cp_id):
     try:
         cp = get_charging_point(cp_id)
-        
+
         if not cp:
             return jsonify({"status": "ERROR", "message": "CP no encontrado"}), 404
-        
-        # Añadir info de conexión
+
         with CONNECTIONS_LOCK:
             cp['connected'] = cp_id in ACTIVE_CONNECTIONS
-        
+
         return jsonify({
             "status": "SUCCESS",
             "data": cp
         }), 200
-        
+
     except Exception as e:
         log_message(f"Central API: Error obteniendo CP {cp_id}: {e}")
         return jsonify({"status": "ERROR", "message": str(e)}), 500
 
 
 # GET /api/active_drivers
-# Devuelve los conductores con carga activa en este momento
 @app.route('/api/active_drivers', methods=['GET'])
 def get_active_drivers():
     try:
@@ -1188,6 +1275,7 @@ def get_active_drivers():
         busy = [cp for cp in cps if cp.get("status") == "BUSY" and cp.get("driver")]
         with CHARGING_START_LOCK:
             start_times = dict(CHARGING_START_TIMES)
+
         result = [
             {
                 "driver_id":  cp["driver"],
@@ -1198,43 +1286,45 @@ def get_active_drivers():
             }
             for cp in busy
         ]
+
         return jsonify({"status": "SUCCESS", "data": result, "count": len(result)}), 200
+    
     except Exception as e:
         return jsonify({"status": "ERROR", "message": str(e)}), 500
 
 
-# GET /api/weather
-# Devuelve el último dato de temperatura por CP (publicado por EV_W)
+# GET /api/weather -> Último dato de temperatura por CP publicado por EV_W
 @app.route('/api/weather', methods=['GET'])
 def get_weather():
     try:
         with WEATHER_LOCK:
             data = dict(WEATHER_DATA)
+
         return jsonify({"status": "SUCCESS", "data": data}), 200
+    
     except Exception as e:
         return jsonify({"status": "ERROR", "message": str(e)}), 500
 
 
-# GET /api/drivers (legacy — kept for compatibility)
+# GET /api/drivers (legacy -> kept for compatibility)
 @app.route('/api/drivers', methods=['GET'])
 def get_all_drivers():
     try:
         db = load_db()
         drivers = db.get("drivers", [])
         return jsonify({"status": "SUCCESS", "data": drivers, "count": len(drivers)}), 200
+    
     except Exception as e:
         return jsonify({"status": "ERROR", "message": str(e)}), 500
 
 
 # GET /api/system/status
-# Devuelve estado general del sistema
 @app.route('/api/system/status', methods=['GET'])
 def get_system_status():
     try:
         cps = list_charging_points()
         db = load_db()
-        
-        # Contar estados
+
         status_count = {
             "ACTIVE": 0,
             "BUSY": 0,
@@ -1242,14 +1332,14 @@ def get_system_status():
             "BROKEN": 0,
             "INACTIVE": 0
         }
-        
+
         for cp in cps:
             status = cp.get("status", "INACTIVE")
             status_count[status] = status_count.get(status, 0) + 1
-        
+
         with CONNECTIONS_LOCK:
             connected_cps = len(ACTIVE_CONNECTIONS)
-        
+
         return jsonify({
             "status": "SUCCESS",
             "data": {
@@ -1260,33 +1350,30 @@ def get_system_status():
                 "timestamp": time.strftime("%Y-%m-%d %H:%M:%S")
             }
         }), 200
-        
+
     except Exception as e:
         log_message(f"Central API: Error obteniendo estado del sistema: {e}")
         return jsonify({"status": "ERROR", "message": str(e)}), 500
 
 
-# GET /api/messages
-# Devuelve los mensajes del sistema (últimos 50)
+# GET /api/messages -> Últimos 50 mensajes del sistema
 @app.route('/api/messages', methods=['GET'])
 def get_system_messages():
     try:
         with MESSAGE_LOCK:
-            # Devolver copia de los últimos 50 mensajes
             recent_messages = MESSAGE_BUFFER[-50:] if len(MESSAGE_BUFFER) > 50 else MESSAGE_BUFFER.copy()
-        
+
         return jsonify({
             "status": "SUCCESS",
             "data": recent_messages,
             "count": len(recent_messages)
         }), 200
-        
+
     except Exception as e:
         return jsonify({"status": "ERROR", "message": str(e)}), 500
 
 
 # GET /api/health
-# Verifica que el API está funcionando
 @app.route('/api/health', methods=['GET'])
 def health_check():
     return jsonify({
@@ -1302,6 +1389,7 @@ def _parse_audit_lines(lines):
         line = line.strip()
         if not line:
             continue
+
         parts = [p.strip() for p in line.split('|')]
         if len(parts) >= 3:
             entries.append({
@@ -1310,11 +1398,11 @@ def _parse_audit_lines(lines):
                 "source":    parts[2],
                 "details":   parts[3] if len(parts) > 3 else ""
             })
+
     return entries
 
 
-# GET /api/audit
-# Devuelve entradas del log de auditoría. Filtros opcionales: ?action=AUTH_FAIL&source=127.0.0.1&limit=100
+# GET /api/audit -> Filtros opcionales: ?action=AUTH_FAIL&source=127.0.0.1&limit=100
 @app.route('/api/audit', methods=['GET'])
 def get_audit():
     try:
@@ -1330,69 +1418,76 @@ def get_audit():
 
         if action_filter:
             entries = [e for e in entries if e['action'] == action_filter]
+
         if source_filter:
             entries = [e for e in entries if source_filter in e['source']]
+
         if limit:
             entries = entries[-limit:]
 
         return jsonify({"status": "SUCCESS", "data": entries, "count": len(entries)}), 200
+    
     except Exception as e:
         return jsonify({"status": "ERROR", "message": str(e)}), 500
 
 
-# GET /api/audit/stream
-# SSE: emite nuevas entradas del log en tiempo real según se van escribiendo
+# GET /api/audit/stream -> SSE: emite nuevas entradas del log en tiempo real
 @app.route('/api/audit/stream', methods=['GET'])
 def stream_audit():
     def generate():
-        last_size = 0
+        last_size = 0                                       # Permite leer solo las líneas nuevas en cada ciclo
         if os.path.exists(AUDIT_LOG_FILE):
             last_size = os.path.getsize(AUDIT_LOG_FILE)
-        yield "data: {}\n\n"          # ping inicial para abrir la conexión
+
+        yield "data: {}\n\n"                                # Ping inicial para abrir la conexión SSE
         while True:
             try:
                 time.sleep(1)
                 if not os.path.exists(AUDIT_LOG_FILE):
                     continue
+
                 current_size = os.path.getsize(AUDIT_LOG_FILE)
                 if current_size <= last_size:
                     continue
+
                 with open(AUDIT_LOG_FILE, 'r') as f:
                     f.seek(last_size)
                     new_lines = f.readlines()
+
                 last_size = current_size
                 for entry in _parse_audit_lines(new_lines):
                     yield f"data: {json.dumps(entry)}\n\n"
+
             except GeneratorExit:
                 break
+
             except Exception:
                 pass
 
     return Response(
         stream_with_context(generate()),
         content_type='text/event-stream',
+        # X-Accel-Buffering: no evita que nginx (si lo hay delante) acumule los chunks SSE en su buffer y los envíe en ráfagas en lugar de en tiempo real
         headers={'Cache-Control': 'no-cache', 'X-Accel-Buffering': 'no'}
     )
 
 
-# Ejecuta el servidor Flask para el API REST
 def run_api_server(port=8000):
     import logging
-    
-    # Desactivar logs de Flask/Werkzeug
+
     log = logging.getLogger('werkzeug')
-    log.setLevel(logging.ERROR)             # Solo mostrar errores críticos
-    
+    log.setLevel(logging.ERROR)
+
     log_message(f"Central: API REST iniciada en puerto {port}")
     app.run(host='0.0.0.0', port=port, debug=False, use_reloader=False)
 
 
 if __name__ == "__main__":
-    # Configurar manejador de señales
     signal.signal(signal.SIGINT, signal_handler)
 
     central_port, broker_ip, broker_port = args()
 
+    # SHARED_PRODUCER se crea aquí para que signal_handler y los hilos Kafka compartan la misma instancia sin necesidad de sincronización adicional
     SHARED_PRODUCER = KafkaProducer(
         bootstrap_servers=f"{broker_ip}:{broker_port}",
         value_serializer=lambda v: v.encode("utf-8")
@@ -1402,17 +1497,17 @@ if __name__ == "__main__":
     reset_charging_points()
 
     threading.Thread(target=create_panel, daemon=True).start()
-    
+
     threading.Thread(target=handle_driver, args=(broker_ip, broker_port), daemon=True).start()
-    
+
     threading.Thread(target=listen_cp_consumption, args=(broker_ip, broker_port), daemon=True).start()
-    
+
     threading.Thread(target=main, args=(central_port,), daemon=True).start()
 
     threading.Thread(target=run_api_server, args=(8000,), daemon=True).start()
-    
+
     time.sleep(2)
-    
+
     clear_screen()
     print("\n" + "="*60)
     print("  EV CHARGING CENTRAL - SISTEMA INICIALIZADO")
@@ -1423,11 +1518,13 @@ if __name__ == "__main__":
     print("="*60)
     print("\n  Iniciando menú de control en 2 segundos...\n")
     time.sleep(2)
-    
+
     try:
         control_menu_loop()
+
     except KeyboardInterrupt:
         print("\n[Central] Cerrando sistema...")
+        
     finally:
         SHUTDOWN_FLAG = True
         time.sleep(1)
