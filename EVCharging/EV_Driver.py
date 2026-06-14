@@ -17,8 +17,6 @@ class DriverTerminal:
         self.charging = False                               # True mientras hay una carga en curso
         self.current_cp = None                              # ID del CP con el que se está cargando ahora
         self.running = True
-        self.manual_charge_active = False                   # Carga iniciada desde el CP (no por el Driver)
-        self.last_consumption = {"kwh": 0, "cost": 0}
         self.menu_blocked = False                           # Bloquea el menú mientras se espera el resultado de una carga
         self.pending_ack = False                            # Señal para que el bucle del menú espere un ENTER antes de redibujar el menú
 
@@ -39,25 +37,17 @@ class DriverTerminal:
         )
 
         print(f"\n{'='*60}")
-        print(f"  EV DRIVER - Sistema de Carga de Vehículos Eléctricos")
+        print(f"  EV DRIVER")
         print(f"{'='*60}")
-        print(f"  Driver ID:    {self.driver_id}")
-        print(f"  Broker:       {self.broker_ip}:{self.broker_port}")
-        print(f"{'='*60}\n")
+        print(f"  Driver ID :   {self.driver_id}")
+        print(f"  Broker    :   {self.broker_ip}:{self.broker_port}")
+        print(f"{'='*60}")
 
         # Hilo para escuchar Kafka en segundo plano sin bloquear el menú
         threading.Thread(target=self.listen_kafka, daemon=True).start()
 
-    # Limpiar pantalla 
-    def clear_screen(self):
-        import os
-        os.system('cls' if os.name == 'nt' else 'clear')
-
     # Mostrar menú principal
     def show_menu(self):
-        print(f"\n{'─'*60}")
-        print(f"  MENÚ PRINCIPAL - Driver {self.driver_id}")
-        print(f"{'─'*60}")
 
         if self.charging:
             print(f"  Estado: CARGANDO en {self.current_cp}")
@@ -65,12 +55,12 @@ class DriverTerminal:
         else:
             print(f"  Estado: DISPONIBLE")
 
-        print(f"{'─'*60}")
+        print(f"{'='*60}")
         print(f"  1. Ver puntos de carga disponibles")
         print(f"  2. Solicitar carga en un punto específico")
         print(f"  3. Cargar desde archivo ")
         print(f"  0. Salir")
-        print(f"{'─'*60}")
+        print(f"{'='*60}")
 
     # Mostrar lista de CPs disponibles 
     def show_available_cps(self):
@@ -85,8 +75,8 @@ class DriverTerminal:
                 print("  No hay puntos de carga registrados en el sistema")
 
             else:
-                print(f"\n  {'ID':<10} {'Dirección':<20} {'Precio':<12} {'Estado'}")
-                print(f"  {'-'*56}")
+                print(f"  {'ID':<10} {'Dirección':<20} {'Precio':<12} {'Estado'}")
+                print(f"  {'-'*58}")
                 for cp in sorted(cps, key=lambda x: x['id']):
                     print(f"  {cp['id']:<10} {cp['address']:<20} "
                           f"{float(cp['price']):.2f}€/kWh    {cp['status']}")
@@ -103,9 +93,9 @@ class DriverTerminal:
 
     # Solicitar una carga única
     def request_single_charge(self):
-        print(f"\n{'─'*60}")
+        print(f"\n{'='*60}")
         print(f"  SOLICITAR CARGA ÚNICA")
-        print(f"{'─'*60}")
+        print(f"{'='*60}")
 
         if self.charging:
             print(f"  Ya hay una carga en proceso en {self.current_cp}")
@@ -177,9 +167,9 @@ class DriverTerminal:
 
     # Cargar lista de CPs desde un archivo
     def load_from_file(self):
-        print(f"\n{'─'*60}")
+        print(f"\n{'='*60}")
         print(f"  CARGAR DESDE ARCHIVO")
-        print(f"{'─'*60}")
+        print(f"{'='*60}")
 
         if self.charging:
             print(f"  Ya hay una carga en proceso")
@@ -211,8 +201,7 @@ class DriverTerminal:
 
             if confirm == 's':
                 print(f"\n  Iniciando procesamiento de solicitudes...")
-                print(f"  (Este proceso puede tardar varios minutos)")
-                print(f"\n{'─'*60}\n")
+                print(f"\n{'='*60}\n")
 
                 self.menu_blocked = True
                 self.process_cp_list(cp_ids)
@@ -310,7 +299,6 @@ class DriverTerminal:
                 print(f"  Esta carga fue iniciada desde el punto de recarga")
                 self.charging = True
                 self.current_cp = cp_id
-                self.manual_charge_active = True
 
         elif msg_type == "REJECTED":
             print(f"  Carga RECHAZADA en {cp_id}")
@@ -340,7 +328,6 @@ class DriverTerminal:
 
                 self.charging = False
                 self.current_cp = None
-                self.manual_charge_active = False
                 # Si el menú no está bloqueado por una carga se pide ACK para que el ticket sea visible antes de que se redibuje el menú
                 if not self.menu_blocked:
                     self.pending_ack = True
@@ -371,7 +358,6 @@ class DriverTerminal:
 
                 self.charging = False
                 self.current_cp = None
-                self.manual_charge_active = False
                 if not self.menu_blocked:
                     self.pending_ack = True
 
