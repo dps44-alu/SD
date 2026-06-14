@@ -252,11 +252,11 @@ def listen_central_commands(central_conn, engine_ip, engine_port, cp_id):
 
                             if command == "STOP":
                                 CP_STATUS = "BROKEN"
-                                log_message(f"CP {cp_id} detenido por Central → BROKEN")
+                                log_message(f"CP {cp_id} detenido por Central -> BROKEN")
 
                             elif command == "RESUME":
                                 CP_STATUS = "ACTIVE"
-                                log_message(f"CP {cp_id} reanudado por Central → ACTIVE")
+                                log_message(f"CP {cp_id} reanudado por Central -> ACTIVE")
 
                     except Exception as e:
                         log_message(f"Error reenviando comando al Engine: {e}")
@@ -330,7 +330,7 @@ def connect_engine(central_conn, engine_ip, engine_port, cp_id, gen=0):
                             last_charging_info = {"kwh": 0, "cost": 0}
 
                         if new_status and new_status != CP_STATUS:
-                            log_message(f"Estado: {CP_STATUS} → {new_status}")
+                            log_message(f"Estado: {CP_STATUS} -> {new_status}")
                             CP_STATUS = new_status
                             try:
                                 central_conn.sendall(f"CHANGE#{cp_id}#None#None#{new_status}".encode())
@@ -347,7 +347,7 @@ def connect_engine(central_conn, engine_ip, engine_port, cp_id, gen=0):
 
                 # El bucle interno terminó -> Engine no responde -> Notificar a Central para que actualice el estado del CP a OUT_OF_ORDER
                 if RUNNING and gen == RECONNECT_GEN and CP_STATUS != "OUT_OF_ORDER":
-                    log_message("Engine KO → notificando OUT_OF_ORDER a Central")
+                    log_message("Engine KO -> notificando OUT_OF_ORDER a Central")
                     CP_STATUS = "OUT_OF_ORDER"
                     try:
                         central_conn.sendall(f"CHANGE#{cp_id}#None#None#OUT_OF_ORDER".encode())
@@ -566,7 +566,7 @@ def show_registration_menu(cp_id):
     while True:
         clear_screen()
         print(f"{'='*70}")
-        print(f"  REGISTRO EN REGISTRY — CP {cp_id}")
+        print(f"  REGISTRO EN REGISTRY - CP {cp_id}")
         print(f"{'='*70}")
         CP_ADDRESS = input("  Dirección del CP: ").strip()
         try:
@@ -602,7 +602,7 @@ def reconnect_loop(engine_ip, engine_port, central_ip, central_port, cp_id):
         if not RUNNING:
             break
 
-        log_message("Central desconectada — reintentando conexión en 5s...")
+        log_message("Central desconectada - reintentando conexión en 5s...")
         time.sleep(5)
 
         while RUNNING:

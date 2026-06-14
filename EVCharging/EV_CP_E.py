@@ -3,16 +3,14 @@ import time
 import socket
 import threading
 import os
-from kafka import KafkaProducer
+from kafka import KafkaProducer, KafkaConsumer
 from cryptography.fernet import Fernet
 
 
 # Estado global del CP 
 ENGINE_IP = "0.0.0.0"
-ENGINE_PORT = 6000
 CP_STATUS = "ACTIVE"
 CP_PRICE = None
-CP_ADDRESS = None
 CP_ID = None
 CURRENT_DRIVER = None
 CHARGING_ACTIVE = False
@@ -37,7 +35,7 @@ def clear_screen():
 def engine_log(msg):
     with ENGINE_MESSAGES_LOCK:
         ENGINE_MESSAGES.append(f"[{time.strftime('%H:%M:%S')}] {msg}")
-        if len(ENGINE_MESSAGES) > 15:
+        if len(ENGINE_MESSAGES) > 10:
             ENGINE_MESSAGES.pop(0)
 
 
@@ -69,24 +67,17 @@ def display_engine_screen():
             else:
                 print(f"  Carga  : Sin carga activa")
 
-            print(f"{'─'*60}")
+            print(f"{'='*60}")
 
             if msgs:
-                print(f"  MENSAJES:")
                 for m in msgs[-10:]:
                     print(f"  {m}")
 
             else:
                 print(f"  (sin mensajes)")
 
-            if KEY_REVOKED_FLAG:
-                print(f"{'!'*60}")
-                print(f"  AVISO: CLAVE REVOCADA POR CENTRAL")
-                print(f"  Mensajes Kafka no cifrados. Re-autenticate desde el Monitor.")
-                print(f"{'!'*60}")
-
             print(f"{'='*60}")
-            print(f"  >>> Pulsa ENTER para simular fallo temporal (3s) <<<")
+            print(f"  Pulsa ENTER para simular fallo temporal (3s) ")
             print(f"{'='*60}")
 
         time.sleep(0.5)
@@ -118,10 +109,10 @@ def simulate_failure():
     global CP_STATUS, MANUALLY_STOPPED
     if not MANUALLY_STOPPED:
         CP_STATUS = "OUT_OF_ORDER"
-        engine_log("Fallo simulado → OUT_OF_ORDER (3s)")
+        engine_log("Fallo simulado -> OUT_OF_ORDER (3s)")
         time.sleep(3)
         CP_STATUS = "ACTIVE"
-        engine_log("Recuperado automáticamente → ACTIVE")
+        engine_log("Recuperado automáticamente -> ACTIVE")
 
 
 def listen_keyboard():
@@ -131,7 +122,7 @@ def listen_keyboard():
             threading.Thread(target=simulate_failure, daemon=True).start()
 
         else:
-            engine_log("ENTER ignorado — CP detenido por Central (BROKEN)")
+            engine_log("ENTER ignorado - CP detenido por Central (BROKEN)")
 
 
 def handle_charging(producer, driver_id, cp_id, duration):
@@ -220,7 +211,7 @@ def handle_charging(producer, driver_id, cp_id, duration):
 # Gestiona una conexión TCP con el Monitor
 # Mensaje formato: TIPO#campo1#campo2...
 def handle_monitor(conn, addr, producer):
-    global CP_ID, CP_PRICE, CP_ADDRESS, CP_STATUS, CONFIG_RECEIVED, CURRENT_DRIVER, CURRENT_KWH, CURRENT_COST, STOP_CHARGE, CHARGING_ACTIVE, MANUALLY_STOPPED, FERNET, LAST_CHARGE_END, KEY_REVOKED_FLAG
+    global CP_ID, CP_PRICE, CP_STATUS, CONFIG_RECEIVED, CURRENT_DRIVER, CURRENT_KWH, CURRENT_COST, STOP_CHARGE, CHARGING_ACTIVE, MANUALLY_STOPPED, FERNET, LAST_CHARGE_END, KEY_REVOKED_FLAG
     last_status = ""
 
     while True:
@@ -247,12 +238,10 @@ def handle_monitor(conn, addr, producer):
             elif msg_type == "SET_CONFIG":
                 cp_id = parts[1]
                 price = float(parts[2])
-                address = parts[3]
                 enc_key = parts[4] if len(parts) > 4 and parts[4] else None
 
                 CP_ID = cp_id
                 CP_PRICE = price
-                CP_ADDRESS = address
 
                 if enc_key:
                     FERNET = Fernet(enc_key.encode())
@@ -263,7 +252,7 @@ def handle_monitor(conn, addr, producer):
                     FERNET = None
 
                 CONFIG_RECEIVED = True
-                engine_log(f"Config recibida: {CP_ID} | {CP_ADDRESS} | {CP_PRICE}€/kWh")
+                engine_log(f"Config recibida: {CP_ID} | {CP_PRICE}€/kWh")
                 conn.sendall(b"CONFIG_OK")
 
                 # Reenviar para que Driver reciba su TICKET si Central reinició durante una carga y no procesó el CHARGE_END
@@ -275,7 +264,7 @@ def handle_monitor(conn, addr, producer):
             elif msg_type == "KEY_REVOKED":
                 KEY_REVOKED_FLAG = True
                 FERNET = None
-                engine_log("AVISO: Clave revocada por Central — re-autenticate desde el Monitor")
+                engine_log("AVISO: Clave revocada por Central - re-autenticate desde el Monitor")
                 conn.sendall(b"OK")
 
             elif msg_type == "MANUAL_CHARGE":
@@ -317,7 +306,7 @@ def handle_monitor(conn, addr, producer):
                         STOP_CHARGE = True
 
                 CP_STATUS = "BROKEN"
-                engine_log("Comando STOP recibido → BROKEN")
+                engine_log("Comando STOP recibido -> BROKEN")
                 conn.sendall(b"STOP_OK")
 
             elif msg_type == "RESUME":
@@ -327,7 +316,7 @@ def handle_monitor(conn, addr, producer):
                     STOP_CHARGE = False
 
                 CP_STATUS = "ACTIVE"
-                engine_log("Comando RESUME recibido → ACTIVE")
+                engine_log("Comando RESUME recibido -> ACTIVE")
                 conn.sendall(b"RESUME_OK")
 
         except Exception as e:
@@ -338,8 +327,6 @@ def handle_monitor(conn, addr, producer):
 
 
 def listen_charge_requests(producer, broker_ip, broker_port):
-    from kafka import KafkaConsumer
-
     # Esperar hasta recibir SET_CONFIG del Monitor o CP_ID antes de suscribirse a Kafka
     engine_log("Esperando configuración del Monitor...")
     while not CONFIG_RECEIVED or CP_ID is None:
@@ -374,10 +361,6 @@ def listen_charge_requests(producer, broker_ip, broker_port):
 
             # Verificar que no está manualmente detenido
             if cp_id == CP_ID and CP_STATUS == "ACTIVE" and not CHARGING_ACTIVE and not MANUALLY_STOPPED:
-                confirm_msg = f"CHARGE_STARTED#{driver_id}#{cp_id}"
-                producer.send("respuestas_engine", confirm_msg)
-                producer.flush()
-
                 threading.Thread(
                     target=handle_charging,
                     args=(producer, driver_id, cp_id, duration),

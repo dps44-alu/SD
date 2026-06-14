@@ -205,11 +205,11 @@ def send_command_to_cp(cp_id, command):
                     current_kwh = cp.get("kwh_consumed", 0) if cp else 0
                     current_cost = cp.get("money_consumed", 0) if cp else 0
                     update_charging_point(cp_id, "BROKEN", current_driver, current_kwh, current_cost)
-                    log_message(f"Central: BD actualizada - {cp_id} → BROKEN (Averiado)")
+                    log_message(f"Central: BD actualizada - {cp_id} -> BROKEN (Averiado)")
 
                 elif command == "RESUME":
                     update_charging_point(cp_id, "ACTIVE", "")
-                    log_message(f"Central: BD actualizada - {cp_id} → ACTIVE")
+                    log_message(f"Central: BD actualizada - {cp_id} -> ACTIVE")
 
                 return True
             
@@ -411,7 +411,7 @@ def control_menu_loop():
 
                     update_charging_point(cp_id, "OUT_OF_ORDER", "", 0, 0)
                     audit("KEY_REVOKED", "central_menu", f"cp_id={cp_id}")
-                    log_message(f"Central: Clave revocada para {cp_id} → OUT_OF_ORDER")
+                    log_message(f"Central: Clave revocada para {cp_id} -> OUT_OF_ORDER")
                     print(f"  Clave de {cp_id} revocada. CP puesto en OUT_OF_ORDER.")
 
                     # Si el CP estaba en carga, emitir un ticket parcial para que el Driver no se quede esperando
@@ -421,7 +421,7 @@ def control_menu_loop():
                         
                         SHARED_PRODUCER.send("respuestas_central", ticket)
                         SHARED_PRODUCER.flush()
-                        log_message(f"Central: Ticket parcial enviado a {busy_driver} — {busy_kwh:.2f} kWh, {busy_cost:.2f}€")
+                        log_message(f"Central: Ticket parcial enviado a {busy_driver} - {busy_kwh:.2f} kWh, {busy_cost:.2f}€")
                         audit("CHARGE_INTERRUPTED", cp_id, f"driver={busy_driver} kwh={busy_kwh:.2f} cost={busy_cost:.2f}")
                         with CHARGING_START_LOCK:
                             CHARGING_START_TIMES.pop(cp_id, None)
@@ -730,7 +730,7 @@ def listen_cp_consumption(broker_ip, broker_port):
                     consumption = fernet.decrypt(token.encode()).decode()
 
                 except Exception:
-                    log_message(f"Central: CP {cp_id_prefix} — mensaje no comprensible (clave incorrecta)")
+                    log_message(f"Central: CP {cp_id_prefix} - mensaje no comprensible (clave incorrecta)")
                     continue
 
             else:
@@ -770,7 +770,7 @@ def listen_cp_consumption(broker_ip, broker_port):
                     PENDING_WEATHER_STOP.discard(cp_id)                     # Ahora que la carga terminó, ejecutar el STOP 
                     stop_charging_point(cp_id)
                     update_charging_point(cp_id, "OUT_OF_ORDER")
-                    log_message(f"Central: {cp_id} → OUT_OF_ORDER (alerta climática pendiente)")
+                    log_message(f"Central: {cp_id} -> OUT_OF_ORDER (alerta climática pendiente)")
 
                 else:
                     with CONNECTIONS_LOCK:
@@ -782,7 +782,7 @@ def listen_cp_consumption(broker_ip, broker_port):
                     # El Monitor cayó mientras el Engine completaba la carga
                     else:
                         update_charging_point(cp_id, "INACTIVE")                        # Marcar INACTIVE para bloquear nuevas cargas hasta que el Monitor reconecte
-                        log_message(f"Central: {cp_id} → INACTIVE (Monitor desconectado)")
+                        log_message(f"Central: {cp_id} -> INACTIVE (Monitor desconectado)")
 
             with CHARGING_START_LOCK:
                 CHARGING_START_TIMES.pop(cp_id, None)
@@ -995,7 +995,7 @@ def handle_monitor_connection(conn, addr):
                             ticket = f"CHARGE_INTERRUPTED#{driver_id}#{cp_id}#{kwh:.2f}#{cost:.2f}#avería del CP"
                             SHARED_PRODUCER.send("respuestas_central", ticket)
                             SHARED_PRODUCER.flush()
-                            log_message(f"Central: Ticket parcial enviado a {driver_id} — {kwh:.2f} kWh, {cost:.2f}€")
+                            log_message(f"Central: Ticket parcial enviado a {driver_id} - {kwh:.2f} kWh, {cost:.2f}€")
                             audit("CHARGE_INTERRUPTED", cp_id, f"driver={driver_id} kwh={kwh:.2f} cost={cost:.2f}")
 
                         with CHARGING_START_LOCK:
@@ -1032,7 +1032,7 @@ def handle_monitor_connection(conn, addr):
                     cp.get("money_consumed", 0)
                 )
 
-            log_message(f"Central: CP {cp_id} desconectado → INACTIVE")
+            log_message(f"Central: CP {cp_id} desconectado -> INACTIVE")
             audit("CP_DISCONNECTED", cp_id, "Monitor desconectado")
 
         conn.close()
@@ -1132,7 +1132,7 @@ def weather_alert():
 
             if cp["status"] == "BUSY":
                 PENDING_WEATHER_STOP.add(cp_id)         # Añadir a PENDING_WEATHER_STOP para ejecutar el STOP en cuanto llegue el CHARGE_END
-                log_message(f"Central: {cp_id} está BUSY — se detendrá al terminar la carga")
+                log_message(f"Central: {cp_id} está BUSY - se detendrá al terminar la carga")
                 return jsonify({"status": "SUCCESS", "action": "STOP_PENDING"}), 200
             
             else:

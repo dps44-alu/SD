@@ -125,7 +125,7 @@ class DriverTerminal:
                 print(f"\n  No hay puntos de carga disponibles en este momento")
         
         except Exception:
-            print(f"\n  (No se pudo consultar CPs — verifica que Central está activa en {self.central_api_url})")
+            print(f"\n  (No se pudo consultar CPs - verifica que Central está activa en {self.central_api_url})")
 
         cp_id = input("\n  Introduce el ID del Punto de Carga: ").strip()
 

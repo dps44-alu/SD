@@ -22,7 +22,7 @@
             "id": "ALC1",
             "address": "c/ Alicante, 1",
             "price": 0.6,
-            "status": "INACTIVE",
+            "status": "ACTIVE",
             "driver": "",
             "kwh_consumed": 0,
             "money_consumed": 0

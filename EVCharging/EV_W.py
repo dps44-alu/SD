@@ -68,7 +68,7 @@ def save_api_key(key):
 
 def prompt_api_key():
     print(f"\n{'='*60}")
-    print(f"  CONFIGURACIÓN API KEY — OPENWEATHER")
+    print(f"  CONFIGURACIÓN API KEY - OPENWEATHER")
     print(f"{'='*60}")
     print(f"  No se encontró una API key configurada.")
     print(f"  Regístrate gratis en https://openweathermap.org/")
@@ -259,7 +259,7 @@ def menu_loop():
                 if cp_id and city:
                     if cp_id in LOCATIONS and LOCATIONS[cp_id] != city:
                         old_city = LOCATIONS[cp_id]
-                        log_message(f"Cambiando ciudad de {cp_id}: {old_city} → {city}")
+                        log_message(f"Cambiando ciudad de {cp_id}: {old_city} -> {city}")
                         # Si había alerta activa para la ciudad anterior, cancelarla en Central antes de reasignar la localización
                         if ALERT_STATUS.get(cp_id, False):
                             log_message(f"Cancelando alerta previa de {cp_id} ({old_city})")
@@ -322,26 +322,26 @@ def check_central_api(url):
     except (requests.exceptions.JSONDecodeError, ValueError):
         # JSONDecodeError indica casi siempre que se apuntó al puerto TCP (5000) en lugar del puerto REST (8000): el TCP devuelve bytes sin formato JSON.
         print(f"\n[EV_W] ERROR: El servidor en {url} no devuelve JSON.")
-        print(f"[EV_W]  → Probablemente estás usando el puerto TCP de Central (normalmente 5000).")
-        print(f"[EV_W]  → EV_W debe apuntar al puerto de la API REST (por defecto: 8000).")
-        print(f"[EV_W]  → Usa: python3 EV_W.py <IP_CENTRAL> 8000")
+        print(f"[EV_W]  -> Probablemente estás usando el puerto TCP de Central (normalmente 5000).")
+        print(f"[EV_W]  -> EV_W debe apuntar al puerto de la API REST (por defecto: 8000).")
+        print(f"[EV_W]  -> Usa: python3 EV_W.py <IP_CENTRAL> 8000")
         return False
     
     except requests.exceptions.Timeout:
         print(f"\n[EV_W] ERROR: El servidor en {url} no respondió (timeout).")
-        print(f"[EV_W]  → Si usaste el puerto TCP (5000), cámbialo al de la API REST (8000).")
-        print(f"[EV_W]  → Usa: python3 EV_W.py <IP_CENTRAL> 8000")
+        print(f"[EV_W]  -> Si usaste el puerto TCP (5000), cámbialo al de la API REST (8000).")
+        print(f"[EV_W]  -> Usa: python3 EV_W.py <IP_CENTRAL> 8000")
         return False
     
     except requests.exceptions.ConnectionError:
         print(f"\n[EV_W] ERROR: No se pudo conectar a {url}.")
-        print(f"[EV_W]  → Asegúrate de que EV_Central está corriendo antes de lanzar EV_W.")
-        print(f"[EV_W]  → Puerto correcto del API REST: 8000 (ej: python3 EV_W.py localhost 8000)")
+        print(f"[EV_W]  -> Asegúrate de que EV_Central está corriendo antes de lanzar EV_W.")
+        print(f"[EV_W]  -> Puerto correcto del API REST: 8000 (ej: python3 EV_W.py localhost 8000)")
         return False
     
     except Exception as e:
         print(f"\n[EV_W] AVISO: No se pudo verificar el API Central en {url}: {e}")
-        print(f"[EV_W]  → Puerto del API REST de Central: 8000")
+        print(f"[EV_W]  -> Puerto del API REST de Central: 8000")
         return False
 
 
