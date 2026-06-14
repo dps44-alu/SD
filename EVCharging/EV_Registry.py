@@ -34,15 +34,12 @@ def load_registry():
             with open(REGISTRY_DB, "r") as f:
                 data = json.load(f)
 
-            creds = load_credentials()
             return {
                 "registered_cps": [
                     {
                         "id": cp["id"],
                         "address": cp["address"],
-                        "price": cp["price"],
-                        "username": creds.get(cp["id"], {}).get("username", f"cp_{cp['id']}"),
-                        "password": creds.get(cp["id"], {}).get("password", "")
+                        "price": cp["price"]
                     }
                     for cp in data.get("charging_points", [])
                 ]
@@ -141,6 +138,12 @@ def unregister_cp(cp_id):
         return jsonify({"status": "ERROR", "message": "CP no encontrado"}), 404
 
     save_registry(registry)
+
+    creds = load_credentials()
+    if cp_id in creds:
+        del creds[cp_id]
+        save_credentials(creds)
+
     print(f"[Registry] CP {cp_id} dado de baja")
 
     return jsonify({"status": "SUCCESS"}), 200
