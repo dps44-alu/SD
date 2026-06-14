@@ -20,15 +20,12 @@ ALERT_STATUS = {}       # True si hay alerta activa : {cp_id: bool}
 # Sistema de mensajes
 MESSAGE_BUFFER = []                     # Acumula líneas generadas por hilos en segundo plano
 MESSAGE_LOCK = threading.Lock()         # Protege el acceso concurrente al buffer
-MENU_REFRESH_EVENT = threading.Event()  # Señala al menú que hay mensajes nuevos para mostrar
 
 
 # Notificar al hilo del menú para que redibuje en cuanto pueda
 def log_message(message):
     with MESSAGE_LOCK:
         MESSAGE_BUFFER.append(f"[{time.strftime('%H:%M:%S')}] {message}")
-
-    MENU_REFRESH_EVENT.set()
 
 
 def clear_screen():
@@ -38,19 +35,19 @@ def clear_screen():
 def display_pending_messages():
     with MESSAGE_LOCK:
         if MESSAGE_BUFFER:
-            print("\n" + "=" * 60)
+            print("\n"+"="*60)
             print("  MENSAJES DEL SISTEMA")
-            print("=" * 60)
+            print("="*60)
             for msg in MESSAGE_BUFFER:
                 print(f"  {msg}")
-            print("=" * 60)
+            print("="*60)
             MESSAGE_BUFFER.clear()              # Vaciar el buffer tras mostrarlo para que no se repitan
             return True
         
     return False
 
 
-# --- Persistencia de API key ---
+# Persistencia de API key 
 def load_api_key():
     try:
         with open(API_KEY_FILE, "r") as f:
@@ -81,9 +78,8 @@ def prompt_api_key():
     return key
 
 
-# --- Localizaciones ---
+# Localizaciones
 def load_locations_from_file(filename="locations.txt"):
-    global LOCATIONS
     try:
         with open(filename, "r") as f:
             for line in f:
@@ -102,7 +98,7 @@ def load_locations_from_file(filename="locations.txt"):
         log_message(f"Archivo {filename} no encontrado. Usar menú para añadir localizaciones.")
 
 
-# --- OpenWeather ---
+# OpenWeather 
 def get_temperature(city):
     try:
         params = {"q": city, "appid": API_KEY, "units": "metric"}
@@ -119,7 +115,7 @@ def get_temperature(city):
         return None
 
 
-# --- Notificaciones a Central ---
+# Notificaciones a Central 
 def push_weather_to_central(cp_id, city, temp, alert):
     try:
         payload = {"cp_id": cp_id, "city": city, "temp": temp, "alert": alert}
@@ -152,14 +148,7 @@ def notify_central_alert(cp_id, alert_type):
         return False
 
 
-# Consulta inmediata y puntual al añadir o cambiar una localización, se ejecuta en un hilo aparte para no bloquear el menú
-def check_temperature_now(cp_id):
-    if cp_id not in LOCATIONS:
-        return
-    
-    city = LOCATIONS[cp_id]
-    log_message(f"Chequeando temperatura actual de {city}...")
-    time.sleep(1)
+def process_cp_temperature(cp_id, city):
     temp = get_temperature(city)
     if temp is not None:
         log_message(f"{cp_id} ({city}): {temp:.1f}°C")
@@ -175,30 +164,28 @@ def check_temperature_now(cp_id):
                 ALERT_STATUS[cp_id] = False
 
 
+# Consulta inmediata y puntual al añadir o cambiar una localización, se ejecuta en un hilo aparte para no bloquear el menú
+def check_temperature_now(cp_id):
+    if cp_id not in LOCATIONS:
+        return
+
+    city = LOCATIONS[cp_id]
+    log_message(f"Chequeando temperatura actual de {city}...")
+    time.sleep(1)
+    process_cp_temperature(cp_id, city)
+
+
 # Consulta OpenWeather cada 4 segundos para cada CP registrado y actualiza Central con temperatura y alertas
 def monitor_weather():
     log_message("Iniciando monitorización de clima (cada 4 segundos)")
     while True:
-        for cp_id, city in list(LOCATIONS.items()):
-            # list() para iterar sobre una copia
-            temp = get_temperature(city)
-            if temp is not None:
-                log_message(f"{cp_id} ({city}): {temp:.1f}°C")
-                push_weather_to_central(cp_id, city, temp, ALERT_STATUS[cp_id])
-                if temp < 0 and not ALERT_STATUS[cp_id]:
-                    log_message(f"ALERTA: {cp_id} temperatura crítica ({temp:.1f}°C)")
-                    if notify_central_alert(cp_id, "ALERT"):
-                        ALERT_STATUS[cp_id] = True
-
-                elif temp >= 0 and ALERT_STATUS[cp_id]:
-                    log_message(f"NORMALIZADO: {cp_id} temperatura restaurada ({temp:.1f}°C)")
-                    if notify_central_alert(cp_id, "CANCEL"):
-                        ALERT_STATUS[cp_id] = False
+        for cp_id, city in list(LOCATIONS.items()):    # list() para iterar sobre una copia
+            process_cp_temperature(cp_id, city)
 
         time.sleep(4)
 
 
-# --- Menú ---
+# Menú 
 def show_menu():
     clear_screen()
     has_messages = display_pending_messages()
@@ -206,9 +193,9 @@ def show_menu():
         print()
 
     print(f"{'='*60}")
-    print(f"  EV_W - WEATHER CONTROL OFFICE")
+    print(f"  EV_W")
     print(f"  Central: {CENTRAL_API_URL}")
-    print(f"  API Key: {'*'*(len(API_KEY)-4) + API_KEY[-4:] if API_KEY else '(no configurada)'}")
+    print(f"  API Key: {API_KEY if API_KEY else '(no configurada)'}")
     print(f"{'='*60}")
     print(f"  Localizaciones monitorizadas:")
     if LOCATIONS:
@@ -228,14 +215,6 @@ def show_menu():
 
 def menu_loop():
     global API_KEY
-
-    def monitor_messages():
-        # Hilo que manteniene activo el sistema de eventos sin ocupar el hilo del menú
-        while True:
-            if MENU_REFRESH_EVENT.wait(timeout=2):
-                MENU_REFRESH_EVENT.clear()
-
-    threading.Thread(target=monitor_messages, daemon=True).start()
 
     while True:
         try:
