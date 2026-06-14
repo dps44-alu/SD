@@ -3,7 +3,6 @@ import socket
 import time
 import threading
 import os
-import select
 import json
 
 import requests
@@ -41,7 +40,7 @@ CENTRAL_CONN = None
 def log_message(msg):
     with MESSAGE_LOCK:
         MESSAGE_BUFFER.append(f"[{time.strftime('%H:%M:%S')}] {msg}")
-        if len(MESSAGE_BUFFER) > 20:
+        if len(MESSAGE_BUFFER) > 6:
             MESSAGE_BUFFER.pop(0)
 
 
@@ -84,13 +83,13 @@ def display_monitor_screen():
 
             status_text, color_text = get_status_display(CP_STATUS)
 
-            print(f"{'='*70}")
+            print(f"{'='*60}")
             print(f"  MONITOR CP - {CP_ID}")
-            print(f"{'='*70}")
+            print(f"{'='*60}")
             print(f"  Dirección : {CP_ADDRESS}")
             print(f"  Precio    : {CP_PRICE}€/kWh")
             print(f"  Estado    : {status_text} ({color_text})")
-            print(f"{'='*70}")
+            print(f"{'='*60}")
 
             if CP_STATUS == "BUSY" and CURRENT_DRIVER:
                 print(f"\n  CARGA EN PROGRESO")
@@ -101,41 +100,34 @@ def display_monitor_screen():
                 print(f"  {'-'*66}")
 
             elif CP_STATUS == "ACTIVE":
-                print(f"\n  Punto de carga listo para recibir solicitudes")
+                print(f"  Punto de carga listo para recibir solicitudes")
 
             elif CP_STATUS == "OUT_OF_ORDER":
-                print(f"\n  Punto de carga fuera de servicio temporalmente")
+                print(f"  Punto de carga fuera de servicio temporalmente")
 
             elif CP_STATUS == "BROKEN":
-                print(f"\n  Punto de carga averiado - detenido por Central")
+                print(f"  Punto de carga averiado - detenido por Central")
                 print(f"  Requiere comando RESUME para volver a operar")
 
             elif CP_STATUS == "INACTIVE":
-                print(f"\n  Punto de carga inactivo")
+                print(f"  Punto de carga inactivo")
 
             if msgs:
-                print(f"\n{'─'*70}")
-                print(f"  MENSAJES DEL SISTEMA")
-                print(f"{'─'*70}")
+                print(f"{'='*60}")
                 for m in msgs[-6:]:
                     print(f"  {m}")
 
-            if KEY_REVOKED_FLAG:
-                print(f"\n  {'!'*66}")
-                print(f"  AVISO: Clave revocada por Central.")
-                print(f"  Mensajes Kafka no son comprensibles. Usa opcion 3 para re-autenticarte.")
-                print(f"  {'!'*66}")
-
-            print(f"\n{'='*70}")
-            print(f"  1: carga manual  |  2: re-registrar  |  3: re-autenticar  |  0: salir")
-            print(f"{'='*70}")
+            print(f"{'='*60}")
+            print(f"  1. Carga manual")
+            print(f"  2. Re-registrar")
+            print(f"  3. Re-autenticar")
+            print(f"  0. Salir")
+            print(f"{'='*60}")
 
         time.sleep(0.5)
 
 
 def send_config_to_engine(engine_ip, engine_port, cp_id):
-    global CP_PRICE, CP_ADDRESS
-
     max_retries = 10
     retry_count = 0
 
@@ -165,7 +157,7 @@ def send_config_to_engine(engine_ip, engine_port, cp_id):
 
 
 def connect_central(central_ip, central_port, cp_id):
-    global CP_PRICE, CP_ADDRESS, CP_STATUS, ENCRYPTION_KEY
+    global ENCRYPTION_KEY
 
     central_conn = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     central_conn.connect((central_ip, central_port))
@@ -220,7 +212,7 @@ def listen_central_commands(central_conn, engine_ip, engine_port, cp_id):
 
             if parts[0] == "KEY_REVOKED" and len(parts) > 1 and parts[1] == cp_id:
                 KEY_REVOKED_FLAG = True
-                log_message("AVISO: Clave revocada por Central. Usa opcion 3 para re-autenticarte.")
+                log_message("AVISO: Clave revocada por Central. Usa opcion 3.")
                 # Propagar KEY_REVOKED al Engine para que también invalide su clave Fernet
                 try:
                     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as eng:
@@ -565,9 +557,9 @@ def show_registration_menu(cp_id):
 
     while True:
         clear_screen()
-        print(f"{'='*70}")
+        print(f"{'='*60}")
         print(f"  REGISTRO EN REGISTRY - CP {cp_id}")
-        print(f"{'='*70}")
+        print(f"{'='*60}")
         CP_ADDRESS = input("  Dirección del CP: ").strip()
         try:
             CP_PRICE = float(input("  Precio (€/kWh): ").strip())

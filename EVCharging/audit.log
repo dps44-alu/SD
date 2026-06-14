@@ -242,3 +242,35 @@
 2026-06-14 15:22:25 | CP_DISCONNECTED      | ALC1            | Monitor desconectado
 2026-06-14 15:22:30 | AUTH_SUCCESS         | 127.0.0.1       | cp_id=ALC1 user=cp_ALC1
 2026-06-14 15:22:48 | CHARGE_END           | ALC1            | driver=Driver1 kwh=10.00 cost=6.00
+2026-06-14 15:24:13 | CP_DISCONNECTED      | ALC1            | Monitor desconectado
+2026-06-14 15:24:13 | CP_DISCONNECTED      | ALC1            | Monitor desconectado
+2026-06-14 15:39:00 | SYSTEM_START         | central         | port=5000 broker=localhost:9092
+2026-06-14 15:39:08 | AUTH_SUCCESS         | 127.0.0.1       | cp_id=ALC1 user=cp_ALC1
+2026-06-14 15:42:54 | KEY_REVOKED          | central_menu    | cp_id=ALC1
+2026-06-14 15:43:03 | CP_DISCONNECTED      | ALC1            | Monitor desconectado
+2026-06-14 15:43:08 | AUTH_SUCCESS         | 127.0.0.1       | cp_id=ALC1 user=cp_ALC1
+2026-06-14 15:43:13 | AUTH_SUCCESS         | 127.0.0.1       | cp_id=ALC1 user=cp_ALC1
+2026-06-14 15:44:27 | CP_DISCONNECTED      | ALC1            | Monitor desconectado
+2026-06-14 15:44:27 | CP_DISCONNECTED      | ALC1            | Monitor desconectado
+2026-06-14 15:44:32 | AUTH_SUCCESS         | 127.0.0.1       | cp_id=ALC1 user=cp_ALC1
+2026-06-14 15:46:02 | CP_DISCONNECTED      | ALC1            | Monitor desconectado
+2026-06-14 15:46:03 | AUTH_SUCCESS         | 127.0.0.1       | cp_id=ALC1 user=cp_ALC1
+2026-06-14 15:46:45 | CP_DISCONNECTED      | ALC1            | Monitor desconectado
+2026-06-14 15:46:46 | AUTH_SUCCESS         | 127.0.0.1       | cp_id=ALC1 user=cp_ALC1
+2026-06-14 15:47:52 | CP_DISCONNECTED      | ALC1            | Monitor desconectado
+2026-06-14 15:47:54 | AUTH_SUCCESS         | 127.0.0.1       | cp_id=ALC1 user=cp_ALC1
+2026-06-14 15:48:24 | CP_DISCONNECTED      | ALC1            | Monitor desconectado
+2026-06-14 15:48:25 | AUTH_SUCCESS         | 127.0.0.1       | cp_id=ALC1 user=cp_ALC1
+2026-06-14 15:49:00 | KEY_REVOKED          | central_menu    | cp_id=ALC1
+2026-06-14 15:49:25 | CP_DISCONNECTED      | ALC1            | Monitor desconectado
+2026-06-14 15:49:25 | AUTH_SUCCESS         | 127.0.0.1       | cp_id=ALC1 user=cp_ALC1
+2026-06-14 15:49:37 | KEY_REVOKED          | central_menu    | cp_id=ALC1
+2026-06-14 15:49:46 | CP_DISCONNECTED      | ALC1            | Monitor desconectado
+2026-06-14 15:49:51 | AUTH_SUCCESS         | 127.0.0.1       | cp_id=ALC1 user=cp_ALC1
+2026-06-14 15:49:56 | AUTH_SUCCESS         | 127.0.0.1       | cp_id=ALC1 user=cp_ALC1
+2026-06-14 15:50:50 | CP_DISCONNECTED      | ALC1            | Monitor desconectado
+2026-06-14 15:50:50 | CP_DISCONNECTED      | ALC1            | Monitor desconectado
+2026-06-14 15:50:54 | AUTH_SUCCESS         | 127.0.0.1       | cp_id=ALC1 user=cp_ALC1
+2026-06-14 15:51:03 | CP_DISCONNECTED      | ALC1            | Monitor desconectado
+2026-06-14 15:51:04 | AUTH_SUCCESS         | 127.0.0.1       | cp_id=ALC1 user=cp_ALC1
+2026-06-14 15:51:08 | CP_DISCONNECTED      | ALC1            | Monitor desconectado
