@@ -212,3 +212,23 @@
 2026-06-13 15:24:44 | AUTH_SUCCESS         | 127.0.0.1       | cp_id=ALC1 user=cp_ALC1
 2026-06-13 15:25:59 | CHARGE_END           | ALC1            | driver=Driver1 kwh=10.00 cost=6.00
 2026-06-13 15:26:10 | CP_DISCONNECTED      | ALC1            | Monitor desconectado
+2026-06-14 14:43:23 | SYSTEM_START         | central         | port=5000 broker=localhost:9092
+2026-06-14 14:43:43 | AUTH_SUCCESS         | 127.0.0.1       | cp_id=ALC1 user=cp_ALC1
+2026-06-14 14:44:31 | CP_DISCONNECTED      | ALC1            | Monitor desconectado
+2026-06-14 14:46:53 | SYSTEM_START         | central         | port=5000 broker=localhost:9092
+2026-06-14 14:46:57 | AUTH_SUCCESS         | 127.0.0.1       | cp_id=ALC1 user=cp_ALC1
+2026-06-14 14:47:17 | CHARGE_END           | ALC1            | driver=Driver1 kwh=10.00 cost=6.00
+2026-06-14 14:52:26 | KEY_REVOKED          | central_menu    | cp_id=ALC1
+2026-06-14 14:52:47 | CP_DISCONNECTED      | ALC1            | Monitor desconectado
+2026-06-14 14:52:52 | AUTH_SUCCESS         | 127.0.0.1       | cp_id=ALC1 user=cp_ALC1
+2026-06-14 14:52:52 | CHARGE_END           | ALC1            | driver=Driver1 kwh=10.00 cost=6.00
+2026-06-14 14:52:57 | AUTH_SUCCESS         | 127.0.0.1       | cp_id=ALC1 user=cp_ALC1
+2026-06-14 14:52:57 | CHARGE_END           | ALC1            | driver=Driver1 kwh=10.00 cost=6.00
+2026-06-14 14:53:11 | CP_DISCONNECTED      | ALC1            | Monitor desconectado
+2026-06-14 14:53:11 | CP_DISCONNECTED      | ALC1            | Monitor desconectado
+2026-06-14 14:53:13 | SYSTEM_START         | central         | port=5000 broker=localhost:9092
+2026-06-14 14:53:16 | AUTH_SUCCESS         | 127.0.0.1       | cp_id=ALC1 user=cp_ALC1
+2026-06-14 14:53:21 | AUTH_SUCCESS         | 127.0.0.1       | cp_id=ALC1 user=cp_ALC1
+2026-06-14 14:53:22 | CHARGE_END           | ALC1            | driver=Driver1 kwh=10.00 cost=6.00
+2026-06-14 14:53:26 | CP_DISCONNECTED      | ALC1            | Monitor desconectado
+2026-06-14 14:53:26 | CP_DISCONNECTED      | ALC1            | Monitor desconectado

@@ -279,11 +279,11 @@ def show_control_menu():
     print(f"{'='*60}")
     print(f"  1. Parar un punto de carga específico")
     print(f"  2. Reanudar un punto de carga específico")
-    print(f"  3. Parar TODOS los puntos de carga")
-    print(f"  4. Reanudar TODOS los puntos de carga")
+    print(f"  3. Parar todos los puntos de carga")
+    print(f"  4. Reanudar todos los puntos de carga")
     print(f"  5. Ver estado de todos los CPs")
-    print(f"  6. Actualizar (refrescar mensajes)")
-    print(f"  7. Revocar clave de un CP")
+    print(f"  6. Refrescar mensajes")
+    print(f"  7. Eliminar clave de un CP")
     print(f"  8. Ver log de auditoría")
     print(f"  0. Salir del menú")
     print(f"{'='*60}")
@@ -292,13 +292,6 @@ def show_control_menu():
 def control_menu_loop():
     global IN_MENU, SHUTDOWN_FLAG
     IN_MENU = True
-
-    def monitor_messages():
-        while not SHUTDOWN_FLAG and IN_MENU:
-            if MENU_REFRESH_EVENT.wait(timeout = 2):
-                MENU_REFRESH_EVENT.clear()
-
-    threading.Thread(target=monitor_messages, daemon=True).start()
 
     while not SHUTDOWN_FLAG:
         try:
@@ -529,27 +522,6 @@ def _cp_tile_content(cp):
     return text, status_colors.get(status, status_colors["INACTIVE"])
 
 
-# Crea una sección oscura con un título y un widget Text
-def _make_section(parent, title, text_height):
-    frame = tk.Frame(parent, bg="#1e1e1e")
-    tk.Label(frame, text=title, bg="#1e1e1e", fg="#888888",
-             font=("Arial", 9, "bold")).pack(anchor="w", padx=6, pady=(6, 1))
-    
-    inner = tk.Frame(frame, bg="#1e1e1e")
-    inner.pack(fill="both", expand=True, padx=6, pady=(0, 6))
-    scroll = tk.Scrollbar(inner, bg="#3a3a3a", troughcolor="#2d2d2d",
-                          activebackground="#555555", width=10)
-    
-    scroll.pack(side="right", fill="y")
-    widget = tk.Text(inner, height=text_height, bg="#1a1a2e", fg="#c9d1d9",
-                     font=("Consolas", 9), state="disabled", wrap="none",
-                     borderwidth=0, relief="flat", insertbackground="white",
-                     selectbackground="#264f78",
-                     yscrollcommand=scroll.set)
-    
-    widget.pack(side="left", fill="both", expand=True)
-    scroll.config(command=widget.yview)
-    return frame, widget                                    # Devuelve el widget Text
 
 
 def create_panel():
@@ -582,16 +554,16 @@ def create_panel():
     _DRV_FRAME = tk.Frame(root, bg="#1e1e1e")
     tk.Label(_DRV_FRAME, text="ON GOING DRIVERS REQUESTS", bg="#1e1e1e", fg="#888888",
              font=("Arial", 9, "bold")).pack(anchor="w", padx=6, pady=(6, 1))
-    
+
     DRIVERS_WIDGET = tk.Text(_DRV_FRAME, height=7, bg="#1a1a2e", fg="#c9d1d9",
                              font=("Consolas", 9), state="disabled", wrap="none",
                              borderwidth=0, relief="flat", insertbackground="white",
                              selectbackground="#264f78")
-    
+
     DRIVERS_WIDGET.pack(fill="both", expand=True, padx=6, pady=(0, 6))
     _DRV_FRAME.grid(row=bottom_row, column=0, columnspan=cols,
                     padx=4, pady=(8, 2), sticky="ew")
-    
+
     DRIVERS_WIDGET.tag_configure("header", foreground="#c9d1d9", font=("Consolas", 9, "bold"))
     DRIVERS_WIDGET.tag_configure("sep",    foreground="#30363d")
     DRIVERS_WIDGET.tag_configure("row",    foreground="#c9d1d9")
@@ -601,12 +573,12 @@ def create_panel():
     _MSG_FRAME = tk.Frame(root, bg="#1e1e1e")
     tk.Label(_MSG_FRAME, text="APPLICATION MESSAGES", bg="#1e1e1e", fg="#888888",
              font=("Arial", 9, "bold")).pack(anchor="w", padx=6, pady=(6, 1))
-    
+
     MESSAGE_WIDGET = tk.Text(_MSG_FRAME, height=10, bg="#1a1a2e", fg="#c9d1d9",
                              font=("Consolas", 9), state="disabled", wrap="none",
                              borderwidth=0, relief="flat", insertbackground="white",
                              selectbackground="#264f78")
-    
+
     MESSAGE_WIDGET.pack(fill="both", expand=True, padx=6, pady=(0, 6))
     _MSG_FRAME.grid(row=bottom_row + 1, column=0, columnspan=cols,
                     padx=4, pady=(2, 8), sticky="ew")
@@ -1301,18 +1273,6 @@ def get_weather():
             data = dict(WEATHER_DATA)
 
         return jsonify({"status": "SUCCESS", "data": data}), 200
-    
-    except Exception as e:
-        return jsonify({"status": "ERROR", "message": str(e)}), 500
-
-
-# GET /api/drivers (legacy -> kept for compatibility)
-@app.route('/api/drivers', methods=['GET'])
-def get_all_drivers():
-    try:
-        db = load_db()
-        drivers = db.get("drivers", [])
-        return jsonify({"status": "SUCCESS", "data": drivers, "count": len(drivers)}), 200
     
     except Exception as e:
         return jsonify({"status": "ERROR", "message": str(e)}), 500
